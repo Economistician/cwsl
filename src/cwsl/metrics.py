@@ -560,9 +560,60 @@ def mae(
     """
     Mean Absolute Error (MAE).
 
-    NOTE: Implementation to be added.
+    Defined as the (optionally weighted) mean absolute error:
+
+        MAE = sum(w_i * |y_true[i] - y_pred[i]|) / sum(w_i)
+
+    Parameters
+    ----------
+    y_true : array-like of shape (n_samples,)
+        Actual values. Must be non-negative for consistency with other metrics.
+
+    y_pred : array-like of shape (n_samples,)
+        Predicted values. Must be non-negative for consistency with other metrics.
+
+    sample_weight : float or array-like of shape (n_samples,), optional
+        Optional non-negative weights per sample. If the total weight is zero,
+        a ValueError is raised.
+
+    Returns
+    -------
+    float
+        Mean absolute error.
+
+    Raises
+    ------
+    ValueError
+        If inputs are invalid or the total weight is zero.
     """
-    raise NotImplementedError
+    y_true_arr = _to_1d_array(y_true, "y_true")
+    y_pred_arr = _to_1d_array(y_pred, "y_pred")
+
+    if y_true_arr.shape != y_pred_arr.shape:
+        raise ValueError(
+            "y_true and y_pred must have the same shape; "
+            f"got {y_true_arr.shape} and {y_pred_arr.shape}"
+        )
+
+    if np.any(y_true_arr < 0):
+        raise ValueError("y_true must be non-negative.")
+    if np.any(y_pred_arr < 0):
+        raise ValueError("y_pred must be non-negative.")
+
+    n = y_true_arr.shape[0]
+    w = _handle_sample_weight(sample_weight, n)
+
+    abs_error = np.abs(y_true_arr - y_pred_arr)
+    weighted_error = w * abs_error
+    total_weight = float(w.sum())
+
+    if total_weight <= 0:
+        raise ValueError(
+            "MAE is undefined: total sample_weight is zero. "
+            "Check your weighting scheme."
+        )
+
+    return float(weighted_error.sum() / total_weight)
 
 
 def rmse(
@@ -573,9 +624,61 @@ def rmse(
     """
     Root Mean Squared Error (RMSE).
 
-    NOTE: Implementation to be added.
+    Defined as the (optionally weighted) root mean squared error:
+
+        RMSE = sqrt( sum(w_i * (y_true[i] - y_pred[i])^2) / sum(w_i) )
+
+    Parameters
+    ----------
+    y_true : array-like of shape (n_samples,)
+        Actual values. Must be non-negative for consistency with other metrics.
+
+    y_pred : array-like of shape (n_samples,)
+        Predicted values. Must be non-negative for consistency with other metrics.
+
+    sample_weight : float or array-like of shape (n_samples,), optional
+        Optional non-negative weights per sample. If the total weight is zero,
+        a ValueError is raised.
+
+    Returns
+    -------
+    float
+        Root mean squared error.
+
+    Raises
+    ------
+    ValueError
+        If inputs are invalid or the total weight is zero.
     """
-    raise NotImplementedError
+    y_true_arr = _to_1d_array(y_true, "y_true")
+    y_pred_arr = _to_1d_array(y_pred, "y_pred")
+
+    if y_true_arr.shape != y_pred_arr.shape:
+        raise ValueError(
+            "y_true and y_pred must have the same shape; "
+            f"got {y_true_arr.shape} and {y_pred_arr.shape}"
+        )
+
+    if np.any(y_true_arr < 0):
+        raise ValueError("y_true must be non-negative.")
+    if np.any(y_pred_arr < 0):
+        raise ValueError("y_pred must be non-negative.")
+
+    n = y_true_arr.shape[0]
+    w = _handle_sample_weight(sample_weight, n)
+
+    sq_error = (y_true_arr - y_pred_arr) ** 2
+    weighted_sq_error = w * sq_error
+    total_weight = float(w.sum())
+
+    if total_weight <= 0:
+        raise ValueError(
+            "RMSE is undefined: total sample_weight is zero. "
+            "Check your weighting scheme."
+        )
+
+    mse = float(weighted_sq_error.sum() / total_weight)
+    return float(np.sqrt(mse))
 
 
 def mape(
@@ -586,6 +689,79 @@ def mape(
     """
     Mean Absolute Percentage Error (MAPE).
 
-    NOTE: Implementation to be added.
+    Defined here in a demand-safe way:
+
+        For all i with y_true[i] > 0:
+            pct_error_i = |y_true[i] - y_pred[i]| / y_true[i]
+
+        MAPE = sum(w_i * pct_error_i) / sum(w_i)  (over i with y_true[i] > 0)
+
+    Intervals with y_true == 0 are excluded from the denominator. If all
+    intervals have y_true == 0:
+        - If total absolute error is also zero, MAPE is defined as 0.0
+        - Otherwise, MAPE is undefined and a ValueError is raised.
+
+    Parameters
+    ----------
+    y_true : array-like of shape (n_samples,)
+        Actual values. Must be non-negative.
+
+    y_pred : array-like of shape (n_samples,)
+        Predicted values. Must be non-negative.
+
+    sample_weight : float or array-like of shape (n_samples,), optional
+        Optional non-negative weights per sample. If provided, only weights
+        corresponding to y_true > 0 are used in the MAPE calculation.
+
+    Returns
+    -------
+    float
+        Mean absolute percentage error.
+
+    Raises
+    ------
+    ValueError
+        If inputs are invalid or MAPE is undefined given the data.
     """
-    raise NotImplementedError
+    y_true_arr = _to_1d_array(y_true, "y_true")
+    y_pred_arr = _to_1d_array(y_pred, "y_pred")
+
+    if y_true_arr.shape != y_pred_arr.shape:
+        raise ValueError(
+            "y_true and y_pred must have the same shape; "
+            f"got {y_true_arr.shape} and {y_pred_arr.shape}"
+        )
+
+    if np.any(y_true_arr < 0):
+        raise ValueError("y_true must be non-negative.")
+    if np.any(y_pred_arr < 0):
+        raise ValueError("y_pred must be non-negative.")
+
+    n = y_true_arr.shape[0]
+    w = _handle_sample_weight(sample_weight, n)
+
+    abs_error = np.abs(y_true_arr - y_pred_arr)
+
+    # Focus only on intervals with positive demand
+    mask = y_true_arr > 0
+    if not np.any(mask):
+        total_error = float(abs_error.sum())
+        if total_error == 0.0:
+            return 0.0
+        raise ValueError(
+            "MAPE is undefined: all y_true are zero while absolute error is positive."
+        )
+
+    pct_error = abs_error[mask] / y_true_arr[mask]
+    w_eff = w[mask]
+
+    weighted_pct_error = w_eff * pct_error
+    total_weight = float(w_eff.sum())
+
+    if total_weight <= 0:
+        raise ValueError(
+            "MAPE is undefined: total effective sample_weight is zero. "
+            "Check your weighting scheme and y_true > 0 coverage."
+        )
+
+    return float(weighted_pct_error.sum() / total_weight)

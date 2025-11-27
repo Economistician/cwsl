@@ -1,9 +1,4 @@
-"""
-CWSL — Cost-Weighted Service Loss Framework
-
-This package provides asymmetric and traditional forecasting error metrics,
-including CWSL, NSL, UD, HR@τ, FRS, MAE, RMSE, MAPE, and wMAPE.
-"""
+from __future__ import annotations
 
 from .metrics import (
     cwsl,
@@ -17,6 +12,8 @@ from .metrics import (
     mape,
 )
 
+from .dataframe import compute_cwsl_df
+
 __all__ = [
     "cwsl",
     "nsl",
@@ -27,4 +24,5 @@ __all__ = [
     "mae",
     "rmse",
     "mape",
+    "compute_cwsl_df",
 ]
