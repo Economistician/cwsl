@@ -85,11 +85,11 @@ This project is under active development.
 
 ### **Planned for v0.1.0**
 
-- [ ] Implement core metrics (CWSL, NSL, HR@τ, UD, wMAPE, FRS)  
+- [X] Implement core metrics (CWSL, NSL, HR@τ, UD, wMAPE, FRS)  
 - [ ] Add `cwsl_from_df` for item–interval DataFrame workflows  
 - [ ] Publish on PyPI (`pip install cwsl`)  
-- [ ] Add example notebooks (QSR, retail, workforce planning)  
-- [ ] Add visualization tools for asymmetric penalties  
+- [X] Add example notebooks (QSR, retail, workforce planning)  
+- [X] Add visualization tools for asymmetric penalties  
 - [ ] Add CWSL-based model comparison utilities  
 
 ---
