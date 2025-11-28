@@ -1,39 +1,41 @@
 [build-system]
-requires = ["setuptools>=64", "wheel"]
+requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "cwsl"
 version = "0.1.0"
-description = "Cost-Weighted Service Loss (CWSL) — A framework for asymmetric forecast error evaluation."
+description = "Cost-Weighted Service Loss (CWSL): an asymmetric forecast error framework for operational forecasting."
 readme = "README.md"
 requires-python = ">=3.9"
-license = { text = "MIT License" }
+license = { text = "MIT" }
 
 authors = [
-    { name = "Kyle Corrie", email = "kcorrie@economistician.com" }
-]
-
-keywords = [
-    "forecasting",
-    "operations",
-    "time series",
-    "asymmetric",
-    "cost-weighted",
-    "error metrics",
-    "readiness",
-    "CWSL",
+  { name = "Kyle Corrie", email = "kcorrie@economistician.com" }
 ]
 
 dependencies = [
-    "numpy>=1.23",
-    "pandas>=1.5"
+  "numpy>=1.23",
+  "pandas>=1.5",
+]
+
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: OS Independent",
+  "Intended Audience :: Science/Research",
+  "Intended Audience :: Developers",
+  "Topic :: Scientific/Engineering",
+  "Topic :: Scientific/Engineering :: Information Analysis",
 ]
 
 [project.urls]
-Homepage = "https://github.com/Economistician/cwsl"
-Source = "https://github.com/Economistician/cwsl"
-Issues = "https://github.com/Economistician/cwsl/issues"
+"Homepage" = "https://github.com/Economistician/cwsl"
+"Issues"   = "https://github.com/Economistician/cwsl/issues"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
 
 [tool.setuptools.packages.find]
 where = ["src"]
