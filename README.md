@@ -25,6 +25,49 @@ CWSL incorporates:
 
 ---
 
+## Quick Start
+
+### **Example 1 — Basic Python Usage**
+
+```python
+from cwsl import cwsl
+
+y_true = [10, 12, 8]
+y_pred = [9, 15, 7]
+
+cu = 2.0  # shortfall cost
+co = 1.0  # overbuild cost
+
+score = cwsl(y_true, y_pred, cu=cu, co=co)
+print(score)
+```
+
+### **Example 2 — DataFrame Workflow**
+
+```python
+import pandas as pd
+from cwsl import compute_cwsl_df
+
+df = pd.DataFrame({
+    "item": ["burger", "burger", "fries"],
+    "actual": [10, 12, 8],
+    "forecast": [9, 15, 7],
+})
+
+results = compute_cwsl_df(
+    df,
+    actual_col="actual",
+    forecast_col="forecast",
+    cu=2.0,
+    co=1.0,
+    groupby_cols=["item"]   # optional
+)
+
+print(results)
+```
+
+---
+
 ## Included Metrics
 
 This library implements CWSL and its supporting diagnostics:
@@ -86,11 +129,22 @@ This project is under active development.
 ### **Planned for v0.1.0**
 
 - [X] Implement core metrics (CWSL, NSL, HR@τ, UD, wMAPE, FRS)  
-- [ ] Add `cwsl_from_df` for item–interval DataFrame workflows  
-- [ ] Publish on PyPI (`pip install cwsl`)  
+- [X] Add `cwsl_from_df` for item–interval DataFrame workflows  
+- [X] Publish on PyPI (`pip install cwsl`)  
 - [X] Add example notebooks (QSR, retail, workforce planning)  
 - [X] Add visualization tools for asymmetric penalties  
-- [ ] Add CWSL-based model comparison utilities  
+- [X] Add CWSL-based model comparison utilities  
+
+---
+
+### **Planned for v0.2.0**
+
+- [ ] Add more DataFrame utilities (multi-item, multi-store)
+- [ ] Add scikit-learn scorer wrappers
+- [ ] Add plot_cwsl_breakdown() visualization tools 
+- [ ] Add asymmetric cost sensitivity analysis utilities 
+- [ ] Add model comparison suite (compare_models_cwsl)
+- [ ] Add documentation site (MkDocs + GitHub Pages) 
 
 ---
 
