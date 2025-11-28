@@ -68,6 +68,27 @@ print(results)
 
 ---
 
+### Example 3 - Grouped Evaluation
+
+```python
+from cwsl import evaluate_groups_df
+
+# df has columns: store_id, item_id, actual_qty, forecast_qty
+group_summary = evaluate_groups_df(
+    df,
+    group_cols=["store_id", "item_id"],
+    actual_col="actual_qty",
+    forecast_col="forecast_qty",
+    cu=2.0,
+    co=1.0,
+    tau=2.0,
+)
+
+print(group_summary.head())
+```
+
+---
+
 ## Model Comparison Example
 
 You can compare multiple forecast models on the same actuals using `compare_forecasts`.
