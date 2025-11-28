@@ -68,6 +68,38 @@ print(results)
 
 ---
 
+## Model Comparison Example
+
+You can compare multiple forecast models on the same actuals using `compare_forecasts`.
+
+```python
+import numpy as np
+from cwsl import compare_forecasts
+
+y_true = np.array([10, 12, 8])
+
+forecasts = {
+    "under_model": np.array([9, 11, 7]),
+    "over_model":  np.array([12, 14, 10]),
+    "naive_model": np.array([10, 12, 8]),
+}
+
+cu = 2.0  # shortfall cost
+co = 1.0  # overbuild cost
+
+df = compare_forecasts(
+    y_true=y_true,
+    forecasts=forecasts,
+    cu=cu,
+    co=co,
+    tau=2.0,
+)
+
+print(df)
+```
+
+---
+
 ## Included Metrics
 
 This library implements CWSL and its supporting diagnostics:

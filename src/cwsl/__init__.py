@@ -13,6 +13,7 @@ from .metrics import (
 )
 
 from .dataframe import compute_cwsl_df
+from .compare import compare_forecasts
 
 __all__ = [
     "cwsl",
@@ -25,4 +26,5 @@ __all__ = [
     "rmse",
     "mape",
     "compute_cwsl_df",
+    "compare_forecasts",
 ]
