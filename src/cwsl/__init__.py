@@ -12,7 +12,7 @@ from .metrics import (
     mape,
 )
 
-from .dataframe import compute_cwsl_df
+from .dataframe import compute_cwsl_df, evaluate_groups_df
 from .compare import compare_forecasts
 
 __all__ = [
@@ -26,5 +26,6 @@ __all__ = [
     "rmse",
     "mape",
     "compute_cwsl_df",
+    "evaluate_groups_df",
     "compare_forecasts",
 ]
