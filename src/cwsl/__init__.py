@@ -12,7 +12,7 @@ from .metrics import (
     mape,
 )
 
-from .dataframe import compute_cwsl_df, evaluate_groups_df
+from .dataframe import compute_cwsl_df, evaluate_groups_df, evaluate_hierarchy_df
 from .compare import compare_forecasts
 
 from .costs import estimate_R_cost_balance
@@ -33,6 +33,9 @@ __all__ = [
     # DataFrame utilities
     "compute_cwsl_df",
     "evaluate_groups_df",
+    "evaluate_hierarchy_df",
+
+    # Forecast Comparisons
     "compare_forecasts",
 
     # Cost / sensitivity helpers
