@@ -1,6 +1,6 @@
 # CWSL
 
-[![license](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+[![license](https://img.shields.io/badge/license-MIT-blue)](LICENSE)  
 ![status](https://img.shields.io/badge/status-active-brightgreen)
 
 **Cost-Weighted Service Loss (CWSL)** is a forecast evaluation framework designed for environments where under-forecasting and over-forecasting do *not* have the same operational cost.
@@ -25,9 +25,70 @@ CWSL incorporates:
 
 ---
 
+## Mathematical Definition
+
+For each interval \(i\):
+
+- Actual demand: \(y_i\)  
+- Forecast: \(\hat{y}_i\)  
+- Shortfall:  
+  \[
+  s_i = \max(0, y_i - \hat{y}_i)
+  \]
+- Overbuild:  
+  \[
+  o_i = \max(0, \hat{y}_i - y_i)
+  \]
+- Penalties:  
+  - \(c_{u,i}\): cost per unit of shortfall  
+  - \(c_{o,i}\): cost per unit of overbuild  
+
+Interval cost:
+\[
+\text{cost}_i = c_{u,i}\, s_i + c_{o,i}\, o_i
+\]
+
+CWSL:
+\[
+\text{CWSL} =
+\frac{\sum_i \text{cost}_i}{\sum_i y_i}
+\]
+
+When penalties are symmetric (`cu == co`), **CWSL reduces exactly to a demand-normalized absolute error**, equivalent to wMAPE.
+
+---
+
+## Simple Numeric Examples
+
+### Shortfall case
+- Actual: 100  
+- Forecast: 90  
+- Shortfall: 10  
+- `cu = 3`, `co = 1`  
+
+Cost:
+```
+cost = 3 * 10 = 30
+CWSL = 30 / 100 = 0.30
+```
+
+### Overbuild case
+- Actual: 100  
+- Forecast: 110  
+- Overbuild: 10  
+- `cu = 3`, `co = 1`
+
+Cost:
+```
+cost = 1 * 10 = 10
+CWSL = 10 / 100 = 0.10
+```
+
+---
+
 ## Quick Start
 
-### **Example 1 — Basic Python Usage**
+### Example 1 — Basic Python Usage
 
 ```python
 from cwsl import cwsl
@@ -42,13 +103,15 @@ score = cwsl(y_true, y_pred, cu=cu, co=co)
 print(score)
 ```
 
-### **Example 2 — DataFrame Workflow**
+---
+
+### Example 2 — DataFrame Workflow
 
 ```python
 import pandas as pd
 from cwsl import compute_cwsl_df
 
-df = pd.DataFrame({
+df = pd.DataDataFrame({
     "item": ["burger", "burger", "fries"],
     "actual": [10, 12, 8],
     "forecast": [9, 15, 7],
@@ -68,12 +131,11 @@ print(results)
 
 ---
 
-### Example 3 - Grouped Evaluation
+### Example 3 — Grouped Evaluation
 
 ```python
 from cwsl import evaluate_groups_df
 
-# df has columns: store_id, item_id, actual_qty, forecast_qty
 group_summary = evaluate_groups_df(
     df,
     group_cols=["store_id", "item_id"],
@@ -91,8 +153,6 @@ print(group_summary.head())
 
 ## Model Comparison Example
 
-You can compare multiple forecast models on the same actuals using `compare_forecasts`.
-
 ```python
 import numpy as np
 from cwsl import compare_forecasts
@@ -105,8 +165,8 @@ forecasts = {
     "naive_model": np.array([10, 12, 8]),
 }
 
-cu = 2.0  # shortfall cost
-co = 1.0  # overbuild cost
+cu = 2.0
+co = 1.0
 
 df = compare_forecasts(
     y_true=y_true,
@@ -123,19 +183,99 @@ print(df)
 
 ## Included Metrics
 
-This library implements CWSL and its supporting diagnostics:
-
-### **Core Metric**
+### Core Metric
 - **CWSL** – Cost-Weighted Service Loss
 
-### **Diagnostics**
+### Diagnostics
 - **NSL** – No-Shortfall Level  
 - **HR@τ** – Hit Rate within Tolerance  
 - **UD** – Underbuild Depth  
 - **wMAPE** – Weighted Mean Absolute Percentage Error  
 - **FRS** – Forecast Readiness Score (`NSL - CWSL`)  
 
-These metrics together provide a multidimensional view of **operational readiness**.
+These metrics provide a multidimensional view of **operational readiness**.
+
+---
+
+---
+
+## Choosing `cu`, `co`, and the Cost Ratio `R = cu/co`
+
+CWSL makes asymmetric costs explicit by requiring two parameters:
+
+- **cu** – penalty for shortfall (being *under*)
+- **co** – penalty for overbuild (being *over*)
+
+The ratio **R = cu / co** is the real decision variable.  
+It expresses *how many times worse* a shortfall is compared to an overbuild.
+
+### Example Interpretation
+- `R = 1` → symmetric costs (short = long)  
+- `R = 2` → shortfalls are twice as costly as overbuilds  
+- `R = 3` → shortfalls are three times worse  
+- `R = 0.5` → overbuilds are more costly (rare but possible)
+
+Most operational environments care primarily about under-forecasting, so **R ≥ 1** is typical.
+
+---
+
+## Ways to Choose R
+
+CWSL supports multiple workflows depending on your maturity.
+
+### **1. Manual Selection (Simple & Explicit)**
+
+```python
+cu = 2.0  # shortfall costs 2× more
+co = 1.0
+```
+
+This is the most common and most transparent approach.
+
+### **2. Cost-Balance Estimation (Data-Driven)**
+
+Use `estimate_R_cost_balance` to derive an R that balances historical
+shortfall and overbuild magnitudes:
+
+```python
+from cwsl import estimate_R_cost_balance
+
+R = estimate_R_cost_balance(y_true, y_pred)
+print(R
+```
+
+This finds the **cost ratio that makes shortfall-cost ≈ overbuild-cost**
+on the historical forecast errors, offering a simple, data-driven default.
+
+---
+
+## Cost Sensitivity Analysis
+
+Because the “true” R is sometimes uncertain, it can be helpful to test
+forecast performance across a range of plausible values.
+
+```python
+from cwsl import cwsl_sensitivity
+
+sens = cwsl_sensitivity(
+    y_true,
+    y_pred,
+    R_list=(0.5, 1.0, 2.0, 3.0),  # default sweep
+    co=1.0,
+)
+print(sens)
+```
+
+This evaluates CWSL at multiple R values and returns a dictionary:
+
+```yaml
+{0.5: 0.08, 1.0: 0.12, 2.0: 0.18, 3.0: 0.22}
+```
+
+Use cases:
+- **Model selection**: choose the model that performs best across the entire R-range
+- **Stress testing**: ensure your chosen model is robust to cost uncertainty
+- **Operational decision-making**: understand how sensitive performance is to cost assumptions
 
 ---
 
@@ -143,35 +283,35 @@ These metrics together provide a multidimensional view of **operational readines
 
 In real-world operations:
 
-- **Shortfalls** cause lost transactions, slower service, queue buildup, recovery delays, and negative customer experience.  
-- **Overbuilds** typically cause minor waste or brief excess capacity.
+- **Shortfalls** cause lost transactions, slower service, queue buildup, and degraded customer experience.  
+- **Overbuilds** typically cause minor waste or temporary excess capacity.  
 
-Despite this, most organizations rely on **symmetric error metrics** that treat ± error as interchangeable.
+Yet most organizations use symmetric metrics (MAE/MAPE/RMSE) that treat ± error as interchangeable.
 
-CWSL exposes readiness-related failures that symmetric metrics consistently hide:
+CWSL exposes what these metrics hide:
 
 - Shortfall clustering at peak periods  
 - Asymmetric operational consequences  
-- Deep misses that matter more than shallow overbuilds  
-- Interval-level vulnerability that MAE/MAPE smooth over  
+- High-cost misses vs low-cost overshoots  
+- Interval-level vulnerability  
 
-If operational reliability matters, CWSL is the metric that aligns with reality.
+If operational reliability matters, **CWSL matches reality**.
 
 ---
 
 ## Who Is CWSL For?
 
-CWSL is applicable to any domain with **short-horizon operational decisions**, including:
+CWSL applies to any domain with **short-horizon operational decisions**, including:
 
-- Quick-service restaurants (QSR) & foodservice  
+- Quick-service restaurants (QSR)  
 - Retail replenishment & on-shelf availability  
 - Workforce & capacity planning  
 - Manufacturing & production scheduling  
 - Logistics & last-mile delivery  
 - Energy & short-term load forecasting  
-- Inventory & supply chain systems  
+- Supply chain & inventory management  
 
-If being “short” is worse than being “long,” CWSL applies.
+If being “short” is worse than being “long,” CWSL is the right metric.
 
 ---
 
@@ -179,25 +319,21 @@ If being “short” is worse than being “long,” CWSL applies.
 
 This project is under active development.
 
-### **Planned for v0.1.0**
+### Planned for v0.1.0
+- [X] Core metrics implemented  
+- [X] `cwsl_from_df` & DataFrame utilities  
+- [X] Published on PyPI  
+- [X] Example notebooks  
+- [X] Visualization tools  
+- [X] Model comparison utilities  
 
-- [X] Implement core metrics (CWSL, NSL, HR@τ, UD, wMAPE, FRS)  
-- [X] Add `cwsl_from_df` for item–interval DataFrame workflows  
-- [X] Publish on PyPI (`pip install cwsl`)  
-- [X] Add example notebooks (QSR, retail, workforce planning)  
-- [X] Add visualization tools for asymmetric penalties  
-- [X] Add CWSL-based model comparison utilities  
-
----
-
-### **Planned for v0.2.0**
-
-- [ ] Add more DataFrame utilities (multi-item, multi-store)
-- [ ] Add scikit-learn scorer wrappers
-- [ ] Add plot_cwsl_breakdown() visualization tools 
-- [ ] Add asymmetric cost sensitivity analysis utilities 
-- [ ] Add model comparison suite (compare_models_cwsl)
-- [ ] Add documentation site (MkDocs + GitHub Pages) 
+### Planned for v0.2.0
+- [ ] More DataFrame utilities  
+- [ ] scikit-learn wrappers  
+- [ ] `plot_cwsl_breakdown()`  
+- [ ] Cost sensitivity analysis  
+- [ ] CWSL model comparison suite  
+- [ ] Full documentation site  
 
 ---
 
@@ -205,8 +341,8 @@ This project is under active development.
 
 If you'd like to discuss forecasting, operations, analytics, or the CWSL framework:
 
-- Email: kcorrie@economistician.com
-- LinkedIn: https://www.linkedin.com/in/kcorrie/
+- **Email:** kcorrie@economistician.com  
+- **LinkedIn:** https://www.linkedin.com/in/kcorrie/
 
-Created by **Kyle Corrie** (Economistician)
+Created by **Kyle Corrie (Economistician)**  
 Founder of the CWSL Metric and the Forecast Readiness Framework
