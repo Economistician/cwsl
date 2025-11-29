@@ -223,6 +223,90 @@ print(df)
 
 ---
 
+## Model Selection with CWSL
+
+Once you have multiple candidate models (random forests, gradient boosting,
+ARIMA-style models with tabular features, etc.), you can use CWSL as the
+selection criterion instead of RMSE or MAE.
+
+The helper `select_model_by_cwsl`:
+
+- Fits each model on `(X_train, y_train)` using its native loss.
+- Predicts on a validation set `(X_val)`.
+- Computes CWSL, RMSE, and wMAPE on the validation targets `y_val`.
+- Returns the model with the **lowest CWSL** (i.e., lowest cost under your
+  asymmetric penalties).
+
+```python
+from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
+from cwsl import select_model_by_cwsl
+
+models = {
+    "rf": RandomForestRegressor(random_state=0),
+    "gbr": GradientBoostingRegressor(random_state=0),
+}
+
+best_name, best_model, results = select_model_by_cwsl(
+    models=models,
+    X_train=X_train,
+    y_train=y_train,
+    X_val=X_val,
+    y_val=y_val,
+    cu=2.0,   # shortfall cost
+    co=1.0,   # overbuild cost
+)
+
+print(results)
+print("Best model by CWSL:", best_name)
+```
+
+This keeps training completely standard (RMSE-style loss inside each model),
+but uses **CWSL as the referee** when choosing which model is operationally
+best under asymmetric costs.
+
+## Using CWSL as a scorer in scikit-learn
+
+You can also plug CWSL directly into scikit-learn search utilities
+(`GridSearchCV`, `RandomizedSearchCV`, `cross_val_score`, etc.) using the
+cwsl_scorer helper.
+
+```python
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.model_selection import GridSearchCV
+from cwsl import cwsl_scorer
+
+model = RandomForestRegressor(random_state=0)
+
+# Build a scorer with your chosen cost ratio R = cu / co
+scorer = cwsl_scorer(cu=2.0, co=1.0)
+
+grid = GridSearchCV(
+    estimator=model,
+    param_grid={"n_estimators": [50, 100, 200]},
+    scoring=scorer,
+    cv=3,
+)
+
+grid.fit(X_train, y_train)
+
+print("Best params:", grid.best_params_)
+print("Best CWSL-based score:", grid.best_score_)
+```
+
+Important: to match scikit-learn conventions, the scorer returned by
+cwsl_scorer returns the negative CWSL:
+
+> score = -CWSL
+
+So:
+
+- Lower CWSL → higher score → better model under your asymmetric cost
+structure.
+- You still read and report CWSL itself using the positive values from
+`cwsl(...)` or from the evaluation utilities.
+
+---
+
 ## Why Sensitivity Analysis Matters
 
 One of the core strengths of CWSL is its ability to reveal how different forecast models behave
@@ -274,8 +358,6 @@ These metrics provide a multidimensional view of **operational readiness**.
 
 ---
 
----
-
 ## Choosing `cu`, `co`, and the Cost Ratio `R = cu/co`
 
 CWSL makes asymmetric costs explicit by requiring two parameters:
@@ -318,7 +400,7 @@ shortfall and overbuild magnitudes:
 from cwsl import estimate_R_cost_balance
 
 R = estimate_R_cost_balance(y_true, y_pred)
-print(R
+print(R)
 ```
 
 This finds the **cost ratio that makes shortfall-cost ≈ overbuild-cost**
