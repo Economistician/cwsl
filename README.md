@@ -151,6 +151,48 @@ print(group_summary.head())
 
 ---
 
+### Example 4 — Hierarchical panel (multi-store, multi-item)
+
+You can generate a long-form “panel” table of CWSL metrics across multiple
+levels (overall, by store, by item, etc.) using `evaluate_panel_df`.
+
+```python
+from cwsl import evaluate_panel_df
+
+# df has columns: store_id, item_id, actual_qty, forecast_qty
+levels = {
+    "overall": [],
+    "by_store": ["store_id"],
+    "by_item": ["item_id"],
+    "by_store_item": ["store_id", "item_id"],
+}
+
+panel = evaluate_panel_df(
+    df=df,
+    levels=levels,
+    actual_col="actual_qty",
+    forecast_col="forecast_qty",
+    cu=2.0,
+    co=1.0,
+    tau=2.0,
+)
+
+print(panel.head())
+```
+
+This returns a tidy DataFrame with columns like:
+```text
+level | store_id | item_id | metric       | value
+------+----------+---------+-------------+-------
+overall        …           cwsl          …
+by_store   101   NaN       cwsl          …
+by_item    NaN   WHOPPER   n_intervals   …
+…
+```
+You can export this to CSV, plug it into a BI tool, or join it into a metrics mart.
+
+---
+
 ## Model Comparison Example
 
 ```python
