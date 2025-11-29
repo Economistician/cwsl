@@ -19,7 +19,15 @@ from .dataframe import (
     evaluate_panel_df,
 )
 
-from .compare import compare_forecasts, select_model_by_cwsl
+from .compare import (
+    compare_forecasts, 
+    select_model_by_cwsl,
+)
+
+from .scorers import (
+    cwsl_loss,
+    cwsl_scorer,
+)
 
 from .costs import estimate_R_cost_balance
 from .sensitivity import cwsl_sensitivity
@@ -43,4 +51,6 @@ __all__ = [
     "select_model_by_cwsl",
     "estimate_R_cost_balance",
     "cwsl_sensitivity",
+    "cwsl_loss",
+    "cwsl_scorer",
 ]
