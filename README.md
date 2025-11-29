@@ -181,6 +181,41 @@ print(df)
 
 ---
 
+## Why Sensitivity Analysis Matters
+
+One of the core strengths of CWSL is its ability to reveal how different forecast models behave
+when the operational cost of *under-forecasting* increases.
+
+Traditional symmetric metrics (RMSE, MAE, MAPE) treat all error as interchangeable.  
+CWSL makes the asymmetry explicit — and sensitivity analysis shows how model behavior changes
+as the shortfall penalty **cu** becomes larger relative to the overbuild penalty **co**.
+
+### What the analysis shows
+
+- **Under-lean models** (those that frequently shortfall) become dramatically more expensive  
+  as the cost ratio \( R = cu / co \) increases.
+
+- **Over-lean models** remain stable across all R values, because their risk profile avoids costly shortfalls.
+
+- **Naïve or balanced models** often deteriorate rapidly under higher R values, revealing operational weakness
+  that symmetric metrics fail to surface.
+
+### Why this matters in practice
+
+In real operational environments — QSR production, retail availability, logistics capacity,
+manufacturing throughput, and similar systems — being “short” is usually far more costly than being “long.”
+
+Sensitivity analysis makes it possible to answer questions such as:
+
+- *“Which model is safest if the cost of being short is underestimated?”*  
+- *“Does this model become unstable when cu increases?”*  
+- *“Is this model robust across a realistic range of operational scenarios?”*
+
+By evaluating models across a range of R values, CWSL provides a **cost-aware** and
+**operationally aligned** understanding of forecast performance — something no symmetric metric can offer.
+
+---
+
 ## Included Metrics
 
 ### Core Metric
@@ -331,8 +366,8 @@ This project is under active development.
 - [ ] More DataFrame utilities  
 - [ ] scikit-learn wrappers  
 - [ ] `plot_cwsl_breakdown()`  
-- [ ] Cost sensitivity analysis  
-- [ ] CWSL model comparison suite  
+- [X] Cost sensitivity analysis  
+- [X] CWSL model comparison suite  
 - [ ] Full documentation site  
 
 ---
