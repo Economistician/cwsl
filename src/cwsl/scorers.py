@@ -73,7 +73,8 @@ def cwsl_scorer(
             "Install it with `pip install scikit-learn`."
         ) from e
 
-    def _loss(y_true, y_pred, sample_weight=None):
+    def _loss(y_true, y_pred, sample_weight=None, **kwargs):
+        # Accept **kwargs so sklearn can pass needs_proba / needs_threshold, etc.
         return cwsl_loss(
             y_true=y_true,
             y_pred=y_pred,

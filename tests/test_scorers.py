@@ -3,6 +3,7 @@
 import os
 import sys
 import numpy as np
+import pytest
 
 ROOT_DIR = os.path.dirname(os.path.dirname(__file__))
 SRC_DIR = os.path.join(ROOT_DIR, "src")
@@ -12,25 +13,27 @@ if SRC_DIR not in sys.path:
 from cwsl import cwsl, cwsl_loss, cwsl_scorer
 
 
-class FixedPredictor:
-    """
-    Tiny estimator-like class for testing sklearn scorers.
+from sklearn.base import BaseEstimator, RegressorMixin
 
-    It ignores X/y during fit and always returns a fixed prediction
-    vector on predict(X).
+class FixedPredictor(BaseEstimator, RegressorMixin):
     """
-    def __init__(self, y_pred_val):
-        self.y_pred_val = np.asarray(y_pred_val, dtype=float)
+    Minimal sklearn-compatible regressor that always returns a fixed y_pred.
 
-    def fit(self, X, y):
-        # No-op fit, just return self
+    This is only used for testing the CWSL scorer. By inheriting from
+    BaseEstimator and RegressorMixin, we get proper sklearn tags and avoid
+    future deprecation warnings.
+    """
+    def __init__(self, y_pred):
+        self.y_pred = np.asarray(y_pred, dtype=float)
+
+    def fit(self, X, y=None):
+        # No-op fit to satisfy sklearn API
         return self
 
     def predict(self, X):
+        # Return as many predictions as X rows
         n = len(X)
-        if n != len(self.y_pred_val):
-            raise ValueError("Length of X does not match stored predictions.")
-        return self.y_pred_val
+        return self.y_pred[:n]
 
 
 def test_cwsl_loss_matches_core_metric():
