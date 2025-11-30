@@ -94,8 +94,8 @@ def evaluate_groups_df(
     *,
     actual_col: str = "actual_qty",
     forecast_col: str = "forecast_qty",
-    cu: float = 2.0,
-    co: float = 1.0,
+    cu: Union[float, str] = 2.0,
+    co: Union[float, str] = 1.0,
     tau: float = 2.0,
     sample_weight_col: str | None = None,
 ) -> pd.DataFrame:
@@ -113,6 +113,12 @@ def evaluate_groups_df(
         - RMSE
         - MAPE
 
+    It supports both global and per-row asymmetric costs:
+
+        - If `cu` / `co` are floats, they are treated as global costs.
+        - If `cu` / `co` are column names (str), those columns are read
+          per row and passed through to the underlying metric functions.
+
     Parameters
     ----------
     df : pandas.DataFrame
@@ -127,13 +133,15 @@ def evaluate_groups_df(
     forecast_col : str, default "forecast_qty"
         Name of the column containing forecasted demand.
 
-    cu : float, default 2.0
-        Underbuild (shortfall) cost per unit, applied uniformly
-        across all rows/groups.
+    cu : float or str, default 2.0
+        Underbuild (shortfall) cost per unit. Either:
+        - scalar, applied uniformly across all rows/groups, OR
+        - name of a column in `df` containing per-row underbuild costs.
 
-    co : float, default 1.0
-        Overbuild (excess) cost per unit, applied uniformly
-        across all rows/groups.
+    co : float or str, default 1.0
+        Overbuild (excess) cost per unit. Either:
+        - scalar, applied uniformly across all rows/groups, OR
+        - name of a column in `df` containing per-row overbuild costs.
 
     tau : float, default 2.0
         Tolerance parameter for HR@tau (absolute units).
@@ -158,6 +166,11 @@ def evaluate_groups_df(
     missing = [c for c in group_cols + [actual_col, forecast_col] if c not in df.columns]
     if missing:
         raise KeyError(f"Missing required columns in df: {missing}")
+
+    if isinstance(cu, str) and cu not in df.columns:
+        raise KeyError(f"cu column '{cu}' not found in df")
+    if isinstance(co, str) and co not in df.columns:
+        raise KeyError(f"co column '{co}' not found in df")
 
     if sample_weight_col is not None and sample_weight_col not in df.columns:
         raise KeyError(f"sample_weight_col '{sample_weight_col}' not found in df")
@@ -188,9 +201,21 @@ def evaluate_groups_df(
         else:
             sample_weight = None
 
+        # Handle cu: scalar vs column
+        if isinstance(cu, str):
+            cu_value = g[cu].to_numpy(dtype=float)
+        else:
+            cu_value = cu
+
+        # Handle co: scalar vs column
+        if isinstance(co, str):
+            co_value = g[co].to_numpy(dtype=float)
+        else:
+            co_value = co
+
         # Core + diagnostics
         row["CWSL"] = _safe_metric(
-            lambda: cwsl(y_true, y_pred, cu=cu, co=co, sample_weight=sample_weight)
+            lambda: cwsl(y_true, y_pred, cu=cu_value, co=co_value, sample_weight=sample_weight)
         )
         row["NSL"] = _safe_metric(lambda: nsl(y_true, y_pred, sample_weight=sample_weight))
         row["UD"] = _safe_metric(lambda: ud(y_true, y_pred, sample_weight=sample_weight))
@@ -206,7 +231,13 @@ def evaluate_groups_df(
             )
         )
         row["FRS"] = _safe_metric(
-            lambda: frs(y_true, y_pred, cu=cu, co=co, sample_weight=sample_weight)
+            lambda: frs(
+                y_true,
+                y_pred,
+                cu=cu_value,
+                co=co_value,
+                sample_weight=sample_weight,
+            )
         )
 
         # Baseline symmetric metrics
