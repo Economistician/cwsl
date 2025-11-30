@@ -118,3 +118,74 @@ def test_electric_barometer_refit_on_full_runs():
     cwsl_val = eb.cwsl_score(y_true=y_val, y_pred=y_pred_val)
     assert np.isfinite(cwsl_val)
     assert cwsl_val >= 0.0
+
+
+def test_electric_barometer_cv_selection():
+    rng = np.random.RandomState(123)
+
+    n_samples = 150
+    n_features = 3
+
+    X = rng.randn(n_samples, n_features)
+    noise = rng.randn(n_samples) * 0.1
+
+    # Linear-ish signal on first feature, then shift positive for CWSL
+    y_raw = 4.0 * X[:, 0] + noise
+    y = y_raw - y_raw.min() + 1.0  # ensure strictly positive "demand"
+
+    models = {
+        "dummy_mean": DummyRegressor(strategy="mean"),
+        "linear": LinearRegression(),
+    }
+
+    # selection_mode="cv" ignores X_val / y_val and runs K-fold on X_train / y_train
+    eb = ElectricBarometer(
+        models=models,
+        cu=2.0,
+        co=1.0,
+        tau=2.0,
+        selection_mode="cv",
+        cv=3,
+        random_state=42,
+    )
+
+    # For CV mode we can just pass X, y in both train/val slots; val is ignored
+    eb.fit(X, y, X, y)
+
+    # Basic checks
+    assert eb.best_name_ in models
+    assert eb.best_model_ is not None
+
+    # results_ should be a DataFrame with one row per model
+    assert hasattr(eb, "results_")
+    assert isinstance(eb.results_, pd.DataFrame)
+
+    # Index should match the model names
+    assert set(eb.results_.index) == set(models.keys())
+
+    # CV results should have the expected columns
+    for col in ["CWSL", "RMSE", "wMAPE"]:
+        assert col in eb.results_.columns
+
+    # Validation metrics (mean CV scores) should be finite and non-negative where applicable
+    assert eb.validation_cwsl_ is not None
+    assert np.isfinite(eb.validation_cwsl_)
+    assert eb.validation_cwsl_ >= 0.0
+
+    assert eb.validation_rmse_ is not None
+    assert np.isfinite(eb.validation_rmse_)
+    assert eb.validation_rmse_ >= 0.0
+
+    assert eb.validation_wmape_ is not None
+    assert np.isfinite(eb.validation_wmape_)
+    assert eb.validation_wmape_ >= 0.0
+
+    # Predict on the full X and check shape
+    y_pred = eb.predict(X)
+    assert isinstance(y_pred, np.ndarray)
+    assert y_pred.shape == y.shape
+
+    # CWSL on the chosen model should be finite and non-negative
+    cwsl_val = eb.cwsl_score(y_true=y, y_pred=y_pred)
+    assert np.isfinite(cwsl_val)
+    assert cwsl_val >= 0.0
