@@ -223,6 +223,75 @@ print(df)
 
 ---
 
+### Entity-level cost ratios (advanced)
+
+In many use cases, a **single global cost ratio** 
+
+> R = cu / co
+
+is enough. For more advanced users, CWSL also supports **entity-level** cost
+ratios Rₑ (e.g., per item, SKU, or location).
+
+You can estimate Rₑ from historical forecast performance using a simple
+"balance" method:
+
+```python
+from cwsl import estimate_entity_R_from_balance
+
+entity_costs = estimate_entity_R_from_balance(
+    df=df,                 # panel with entity, actual, forecast
+    entity_col="entity",   # e.g., item_id, sku, product, store
+    y_true_col="actual",
+    y_pred_col="forecast",
+    ratios=(0.5, 1.0, 2.0, 3.0),  # candidate R values
+    co=1.0,                # base overbuild cost
+    sample_weight_col=None,
+)
+
+print(entity_costs.head())
+```
+
+This returns one row per entity with:
+
+- `entity`
+- `R` (chosen cost ratio)
+- `cu (R * co)`
+- `co`
+- `under_cost`, `over_cost`, and their absolute difference `diff`
+
+You can then merge `cu` / `co` back into your panel and use them in
+grouped evaluation:
+
+```python
+from cwsl import evaluate_groups_df
+
+df_with_costs = df.merge(
+    entity_costs[["entity", "cu", "co"]],
+    on="entity",
+    how="left",
+)
+
+summary = evaluate_groups_df(
+    df=df_with_costs,
+    group_cols=["entity"],
+    actual_col="actual",
+    forecast_col="forecast",
+    cu="cu",   # per-row shortfall cost
+    co="co",   # per-row overbuild cost
+    tau=2.0,
+)
+
+print(summary.head())
+```
+
+This pattern lets you:
+
+- Start with a **global** R (simple)
+- Upgrade to **entity-level** Rₑ (advanced)
+- Without changing the core CWSL API.
+
+---
+
 ## Model Selection with CWSL
 
 Once you have multiple candidate models (random forests, gradient boosting,
