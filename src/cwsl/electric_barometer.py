@@ -11,10 +11,25 @@ from .metrics import cwsl, rmse, wmape
 
 def _clone_model(model: Any) -> Any:
     """
-    Lightweight clone for sklearn-style estimators.
+    Lightweight clone for sklearn-style estimators or adapter-like objects.
 
-    - If sklearn is available, use sklearn.base.clone.
-    - Otherwise, reconstruct from class + get_params() if present.
+    Cloning strategy
+    ----------------
+    1. If sklearn is available, try sklearn.base.clone(model).
+    2. Otherwise, if the object implements get_params(), re-instantiate via:
+           model.__class__(**model.get_params())
+    3. As a last resort, call model.__class__() with no arguments.
+
+    Notes for custom adapters
+    -------------------------
+    If you implement your own adapter (e.g., for statsmodels, Prophet, ARIMA),
+    you have two main options to play nicely with ElectricBarometer:
+
+    - Make your adapter "configuration-only" at __init__ time and implement
+      get_params() so that it can be reconstructed via __class__(**params).
+
+    - Or, if you need custom cloning logic, instantiate fresh adapters in your
+      own code before passing them into ElectricBarometer.
     """
     # Try sklearn.clone if available
     try:
@@ -33,6 +48,50 @@ def _clone_model(model: Any) -> Any:
     return model.__class__()
 
 
+class BaseAdapter:
+    """
+    Minimal base class for non-sklearn-style forecast engines.
+
+    Subclasses are expected to wrap libraries like statsmodels, Prophet,
+    ARIMA/SARIMAX, or any custom forecasting engine, and present a
+    scikit-learn-like interface:
+
+        adapter = MyAdapter(...)
+        adapter.fit(X, y)       # returns self
+        y_pred = adapter.predict(X)
+
+    Requirements
+    ------------
+    - fit(self, X, y, sample_weight=None) -> BaseAdapter
+        X : array-like or ignored (for pure time-series models)
+        y : 1D array-like of targets
+        sample_weight : optional, can be ignored if not supported.
+
+    - predict(self, X) -> array-like
+        Should return a 1D numpy array of predictions for each row in X.
+
+    ElectricBarometer itself does *not* need to know whether a model is a
+    "real" sklearn estimator or an adapter; it simply calls .fit() and
+    .predict(). This base class is provided as a clear, documented contract
+    for users who want to adapt non-sklearn libraries into the EB ecosystem.
+    """
+
+    def fit(
+        self,
+        X: np.ndarray,
+        y: np.ndarray,
+        sample_weight: Optional[np.ndarray] = None,
+    ) -> "BaseAdapter":
+        raise NotImplementedError(
+            "BaseAdapter subclasses must implement .fit(X, y, sample_weight=None)."
+        )
+
+    def predict(self, X: np.ndarray) -> np.ndarray:
+        raise NotImplementedError(
+            "BaseAdapter subclasses must implement .predict(X)."
+        )
+
+
 class ElectricBarometer:
     """
     ElectricBarometer: cost-aware model selector built on CWSL.
@@ -40,7 +99,8 @@ class ElectricBarometer:
     This is a high-level wrapper that:
 
       * Takes a dictionary of candidate forecast models (typically scikit-learn
-        regressors with .fit() / .predict() methods).
+        regressors with .fit() / .predict() methods, or adapters that follow
+        the same interface).
       * Trains all candidates either:
           - on a holdout split (train/validation), or
           - via simple K-fold cross-validation (CV).
@@ -60,6 +120,9 @@ class ElectricBarometer:
 
             model.fit(X_train, y_train, sample_weight=...)
             model.predict(X_val)
+
+        You can also pass custom adapters that subclass `BaseAdapter` or at
+        least implement the same .fit/.predict interface.
 
     cu : float, default 2.0
         Underbuild (shortfall) cost per unit. Must be strictly positive.

@@ -39,7 +39,10 @@ from .sensitivity import cwsl_sensitivity
 
 from .training import make_cwsl_keras_loss
 
-from .electric_barometer import ElectricBarometer
+from .electric_barometer import (
+    ElectricBarometer, 
+    BaseAdapter
+)
 
 __all__ = [
     # Core metrics
@@ -78,4 +81,5 @@ __all__ = [
 
     # High-level engine
     "ElectricBarometer",
+    "BaseAdapter",
 ]
