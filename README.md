@@ -507,6 +507,77 @@ Use cases:
 
 ---
 
+### Advanced: Entity-level R (per item / SKU / entity)
+
+In many real systems, not every item has the same asymmetry.  
+You may want a **global** cost ratio \(R = cu / co\) for most use cases, but allow
+**entity-specific** Rₑ for high-impact items (e.g., core entree vs. napkins).
+
+CWSL provides two helpers for this:
+
+1. `estimate_entity_R_from_balance(...)`  
+   – scans a grid of candidate cost ratios for each entity and finds the Rₑ
+   where underbuild vs overbuild cost are closest in magnitude.
+
+2. `evaluate_panel_with_entity_R(...)`  
+   – takes a panel of entity–interval data and an entity-level R table, and
+   computes the full CWSL metric suite using **per-entity cuₑ, coₑ**.
+
+Example:
+
+```python
+import pandas as pd
+from cwsl import (
+    estimate_entity_R_from_balance,
+    evaluate_panel_with_entity_R,
+)
+
+# panel of interval-level data
+# columns: entity, t, actual_qty, forecast_qty
+df_panel = pd.DataFrame({
+    "entity": ["A", "A", "B", "B", "C", "C"],
+    "t":      [1, 2, 1, 2, 1, 2],
+    "actual_qty":   [10, 12, 15, 20,  8,  9],
+    "forecast_qty": [11, 14, 14, 19,  7, 10],
+})
+
+# 1) Estimate Rₑ for each entity using a small grid and co = 1.0
+entity_R = estimate_entity_R_from_balance(
+    df=df_panel,
+    entity_col="entity",
+    y_true_col="actual_qty",
+    y_pred_col="forecast_qty",
+    ratios=(0.5, 1.0, 2.0, 3.0),
+    co=1.0,
+    sample_weight_col=None,
+)
+
+print(entity_R)
+# columns: entity, R, cu, co, under_cost, over_cost, diff
+
+# 2) Evaluate the panel using those entity-specific Rₑ values
+summary = evaluate_panel_with_entity_R(
+    df=df_panel,
+    entity_R=entity_R,
+    entity_col="entity",
+    y_true_col="actual_qty",
+    y_pred_col="forecast_qty",
+    tau=2.0,
+    sample_weight_col=None,
+)
+
+print(summary)
+# one row per entity with:
+#   entity, R, cu, co,
+#   CWSL, NSL, UD, wMAPE, HR@tau,
+#   FRS, MAE, RMSE, MAPE
+```
+
+This pattern lets you start with a **global R** for simplicity, then selectively
+introduce **entity-level Rₑ** for items where asymmetry matters most.
+
+---
+
 ## Why CWSL Matters
 
 In real-world operations:
