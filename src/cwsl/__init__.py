@@ -29,7 +29,11 @@ from .scorers import (
     cwsl_scorer,
 )
 
-from .costs import estimate_R_cost_balance
+from .costs import (
+    estimate_R_cost_balance,
+    estimate_entity_R_from_balance,
+)
+
 from .sensitivity import cwsl_sensitivity
 
 __all__ = [
@@ -50,6 +54,7 @@ __all__ = [
     "compare_forecasts",
     "select_model_by_cwsl",
     "estimate_R_cost_balance",
+    "estimate_entity_R_from_balance",
     "cwsl_sensitivity",
     "cwsl_loss",
     "cwsl_scorer",
