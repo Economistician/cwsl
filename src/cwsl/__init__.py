@@ -17,6 +17,7 @@ from .dataframe import (
     evaluate_groups_df, 
     evaluate_hierarchy_df,
     evaluate_panel_df,
+    evaluate_panel_with_entity_R,
 )
 
 from .compare import (
@@ -55,6 +56,7 @@ __all__ = [
     "evaluate_groups_df",
     "evaluate_hierarchy_df",
     "evaluate_panel_df",
+    "evaluate_panel_with_entity_R",
 
     # Comparison utilities
     "compare_forecasts",
