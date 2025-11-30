@@ -38,6 +38,74 @@ def _make_positive_regression(
     return X, y
 
 
+# ----------------------------------------------------------------------
+# Adapter-style test models
+# ----------------------------------------------------------------------
+class WeirdApiModel:
+    """
+    A toy "non-sklearn" model with a weird API:
+
+        - .train(y): fits on targets only
+        - .inference(n): returns n constant predictions
+
+    We use this to simulate engines like statsmodels, etc.,
+    that don't naturally expose fit(X, y) / predict(X).
+    """
+
+    def __init__(self) -> None:
+        self.mean_: float | None = None
+
+    def train(self, y) -> "WeirdApiModel":
+        y_arr = np.asarray(y, dtype=float)
+        self.mean_ = float(np.mean(y_arr))
+        return self
+
+    def inference(self, n_points: int) -> np.ndarray:
+        if self.mean_ is None:
+            raise RuntimeError("WeirdApiModel has not been trained yet.")
+        return np.full(shape=(n_points,), fill_value=self.mean_, dtype=float)
+
+
+class WeirdModelAdapter:
+    """
+    Minimal sklearn-like wrapper around WeirdApiModel.
+
+    It ignores X entirely and just learns a constant based on y,
+    but exposes:
+
+        - .fit(X, y)
+        - .predict(X)
+
+    so it can be safely used inside ElectricBarometer.
+    """
+
+    def __init__(self, base: WeirdApiModel | None = None) -> None:
+        self.base = WeirdApiModel() if base is None else base
+
+    def fit(self, X, y):
+        # X is ignored here; we train on y only.
+        self.base.train(y)
+        return self
+
+    def predict(self, X):
+        n = len(X)
+        return self.base.inference(n)
+
+    # Optional: minimal sklearn-style param API so clone() / get_params()
+    # can work without errors if needed.
+    def get_params(self, deep: bool = True) -> dict:
+        return {}
+
+    def set_params(self, **params):
+        return self
+
+    def __repr__(self) -> str:
+        return "WeirdModelAdapter()"
+
+
+# ----------------------------------------------------------------------
+# Core EB tests
+# ----------------------------------------------------------------------
 def test_electric_barometer_basic_fit_and_predict():
     rng = np.random.RandomState(0)
 
@@ -305,5 +373,68 @@ def test_electric_barometer_xgboost_engine():
     assert y_pred.shape == y_val.shape
 
     cwsl_val = eb.cwsl_score(y_true=y_val, y_pred=y_pred)
+    assert np.isfinite(cwsl_val)
+    assert cwsl_val >= 0.0
+
+
+def test_electric_barometer_with_adapter_model():
+    """
+    Ensure ElectricBarometer can work with a non-sklearn-style engine
+    wrapped via a simple adapter exposing fit/predict.
+    """
+    rng = np.random.RandomState(999)
+
+    n_samples = 120
+    n_features = 2
+
+    X, y = _make_positive_regression(
+        rng,
+        n_samples=n_samples,
+        n_features=n_features,
+        coef_first=2.5,
+    )
+
+    models = {
+        "dummy_mean": DummyRegressor(strategy="mean"),
+        "weird_adapter": WeirdModelAdapter(),
+    }
+
+    # Use CV selection to exercise _clone_model + adapter interaction
+    eb = ElectricBarometer(
+        models=models,
+        cu=2.0,
+        co=1.0,
+        tau=2.0,
+        selection_mode="cv",
+        cv=3,
+        random_state=0,
+    )
+
+    # In CV mode, X_val / y_val are ignored, so we can pass X, y twice
+    eb.fit(X, y, X, y)
+
+    # Basic checks
+    assert eb.best_name_ in models
+    assert eb.best_model_ is not None
+
+    assert hasattr(eb, "results_")
+    assert isinstance(eb.results_, pd.DataFrame)
+    assert set(eb.results_.index) == set(models.keys())
+
+    # CV score columns present
+    for col in ["CWSL", "RMSE", "wMAPE"]:
+        assert col in eb.results_.columns
+
+    # Mean scores should be finite
+    assert np.isfinite(eb.validation_cwsl_)
+    assert np.isfinite(eb.validation_rmse_)
+    assert np.isfinite(eb.validation_wmape_)
+
+    # Predictions from the refit adapter model should look correct
+    y_pred = eb.predict(X)
+    assert isinstance(y_pred, np.ndarray)
+    assert y_pred.shape == y.shape
+
+    cwsl_val = eb.cwsl_score(y_true=y, y_pred=y_pred)
     assert np.isfinite(cwsl_val)
     assert cwsl_val >= 0.0
