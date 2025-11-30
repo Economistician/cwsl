@@ -36,6 +36,8 @@ from .costs import (
 
 from .sensitivity import cwsl_sensitivity
 
+from .training import make_cwsl_keras_loss
+
 __all__ = [
     # Core metrics
     "cwsl",
@@ -47,15 +49,26 @@ __all__ = [
     "mae",
     "rmse",
     "mape",
+
+    # DataFrame utilities
     "compute_cwsl_df",
     "evaluate_groups_df",
     "evaluate_hierarchy_df",
     "evaluate_panel_df",
+
+    # Comparison utilities
     "compare_forecasts",
     "select_model_by_cwsl",
     "estimate_R_cost_balance",
     "estimate_entity_R_from_balance",
+
+    # Sensitivity analysis
     "cwsl_sensitivity",
+
+    # Scikit-learn scorers & loss
     "cwsl_loss",
     "cwsl_scorer",
+
+    # Keras loss
+    "make_cwsl_keras_loss",
 ]
