@@ -20,13 +20,9 @@ class ElectricBarometer:
         internal loss: MSE, MAE, etc.).
       * Evaluates them on a validation set using:
           - CWSL (with your cu/co),
-          - plus reference metrics (MAE, RMSE, wMAPE, etc.)
+          - plus reference metrics (RMSE, wMAPE, etc.).
       * Selects the validation winner by **minimizing CWSL**.
       * Exposes a clean .fit() / .predict() API and a results_ DataFrame.
-
-    This is the “selection-only” wrapper: it does **not** change the internal
-    training objective of the models. It simply makes sure you’re picking
-    winners according to the right asymmetric cost metric.
 
     Parameters
     ----------
@@ -44,13 +40,18 @@ class ElectricBarometer:
         Overbuild (excess) cost per unit. Must be strictly positive.
 
     tau : float, default 2.0
-        Reserved for future diagnostics (e.g., HR@τ-based summaries). Not used
-        by the current selector, but kept as a configuration parameter.
+        Reserved for future diagnostics (e.g., HR@τ) that may be attached
+        to the ElectricBarometer workflow.
 
     training_mode : {"selection_only"}, default "selection_only"
-        Reserved for future extension. Currently only "selection_only"
+        Reserved for future extension. In v0.3.x, only "selection_only"
         is supported (models train with their own objective; CWSL is used
         only for validation-time selection).
+
+    refit_on_full : bool, default False
+        If True, after selecting the best model by CWSL on the validation
+        set, refit that winning model on the concatenated (train ∪ val)
+        data before exposing it via .best_model_ and .predict().
 
     Attributes
     ----------
@@ -61,8 +62,17 @@ class ElectricBarometer:
         The selected model object itself (fitted).
 
     results_ : pandas.DataFrame or None
-        Comparison table returned by `select_model_by_cwsl`, including:
-        model name, CWSL, RMSE, wMAPE, etc., for each candidate.
+        Comparison table returned by `select_model_by_cwsl`, with one row
+        per candidate model and columns including CWSL, RMSE, wMAPE, etc.
+
+    validation_cwsl_ : float or None
+        CWSL value of the winning model on the validation set.
+
+    validation_rmse_ : float or None
+        RMSE value of the winning model on the validation set (if available).
+
+    validation_wmape_ : float or None
+        wMAPE value of the winning model on the validation set (if available).
 
     r_ : float
         Cost ratio R = cu / co used for selection.
@@ -75,13 +85,14 @@ class ElectricBarometer:
         co: float = 1.0,
         tau: float = 2.0,
         training_mode: str = "selection_only",
+        refit_on_full: bool = False,
     ) -> None:
         if not models:
             raise ValueError("ElectricBarometer requires at least one candidate model.")
 
         if training_mode != "selection_only":
             raise ValueError(
-                "ElectricBarometer currently only supports training_mode='selection_only'."
+                "In v0.3.x, ElectricBarometer only supports training_mode='selection_only'."
             )
 
         if cu <= 0 or co <= 0:
@@ -92,11 +103,17 @@ class ElectricBarometer:
         self.co: float = float(co)
         self.tau: float = float(tau)
         self.training_mode: str = training_mode
+        self.refit_on_full: bool = bool(refit_on_full)
 
         # Fitted state
         self.best_name_: Optional[str] = None
         self.best_model_: Optional[Any] = None
         self.results_: Any = None  # pandas.DataFrame, but we avoid importing pandas here
+
+        # Validation metrics for the winning model
+        self.validation_cwsl_: Optional[float] = None
+        self.validation_rmse_: Optional[float] = None
+        self.validation_wmape_: Optional[float] = None
 
     # ------------------------------------------------------------------
     # Convenience properties
@@ -117,7 +134,6 @@ class ElectricBarometer:
         y_val: np.ndarray,
         sample_weight_train: Optional[np.ndarray] = None,
         sample_weight_val: Optional[np.ndarray] = None,
-        refit_on_full: bool = False,
     ) -> "ElectricBarometer":
         """
         Fit all candidate models and select the best one using CWSL.
@@ -125,39 +141,21 @@ class ElectricBarometer:
         Parameters
         ----------
         X_train : array-like of shape (n_samples_train, n_features)
-            Training features used to fit each candidate model.
-
         y_train : array-like of shape (n_samples_train,)
-            Training targets.
-
         X_val : array-like of shape (n_samples_val, n_features)
-            Validation features used for CWSL-based model selection.
-
         y_val : array-like of shape (n_samples_val,)
-            Validation targets.
-
         sample_weight_train : array-like of shape (n_samples_train,), optional
-            Optional non-negative sample weights for the training rows.
-            (Currently ignored by the selector helper.)
-
+            (Currently ignored in v0.3.x; reserved for future use.)
         sample_weight_val : array-like of shape (n_samples_val,), optional
-            Optional non-negative sample weights for the validation rows.
-            (Currently ignored by the selector helper.)
-
-        refit_on_full : bool, default False
-            If True, after selecting the best model on the (train, val) split,
-            the selector will refit that best model on the concatenated
-            dataset (X_train ∪ X_val, y_train ∪ y_val). This is often what
-            you want for deployment: use validation only for selection, then
-            train the winner on *all* available data.
+            (Currently ignored in v0.3.x; reserved for future use.)
 
         Returns
         -------
         self : ElectricBarometer
             The fitted selector, with best_model_ and results_ populated.
         """
-        # For now, we ignore sample_weight_* when calling the helper, to keep
-        # the interface aligned with select_model_by_cwsl in v0.3.x.
+        # NOTE: select_model_by_cwsl currently does NOT accept sample_weight args,
+        # so we ignore sample_weight_train/sample_weight_val here in v0.3.x.
         best_name, best_model, results = select_model_by_cwsl(
             models=self.models,
             X_train=X_train,
@@ -169,33 +167,40 @@ class ElectricBarometer:
         )
 
         self.best_name_ = best_name
-        self.best_model_ = best_model
         self.results_ = results
 
-        # Optional refit on full dataset (train + val) for deployment
-        if refit_on_full:
+        # Extract validation metrics for the winner, if available
+        self.validation_cwsl_ = None
+        self.validation_rmse_ = None
+        self.validation_wmape_ = None
+
+        try:
+            # results is expected to be a DataFrame with index as model names
+            row = results.loc[best_name]
+            if "CWSL" in row:
+                self.validation_cwsl_ = float(row["CWSL"])
+            if "RMSE" in row:
+                self.validation_rmse_ = float(row["RMSE"])
+            if "wMAPE" in row:
+                self.validation_wmape_ = float(row["wMAPE"])
+        except Exception:
+            # Be defensive: if results is not in the expected shape, just leave
+            # the validation_* attributes as None.
+            pass
+
+        # Optionally refit the winning model on all available data
+        best_model_refit = best_model
+        if self.refit_on_full:
             X_full = np.concatenate([X_train, X_val], axis=0)
             y_full = np.concatenate([y_train, y_val], axis=0)
 
-            if sample_weight_train is not None or sample_weight_val is not None:
-                if sample_weight_train is None or sample_weight_val is None:
-                    raise ValueError(
-                        "If refit_on_full=True and sample weights are used, "
-                        "you must provide both sample_weight_train and "
-                        "sample_weight_val."
-                    )
-                sample_weight_full = np.concatenate(
-                    [sample_weight_train, sample_weight_val],
-                    axis=0,
-                )
-                self.best_model_.fit(
-                    X_full,
-                    y_full,
-                    sample_weight=sample_weight_full,
-                )
-            else:
-                self.best_model_.fit(X_full, y_full)
+            # For now we do not attempt to handle sample_weight here; most
+            # standard regressors accept .fit(X, y) without weights.
+            if hasattr(best_model_refit, "fit"):
+                best_model_refit = best_model_refit.__class__(**getattr(best_model_refit, "get_params", lambda: {})())
+                best_model_refit.fit(X_full, y_full)
 
+        self.best_model_ = best_model_refit
         return self
 
     # ------------------------------------------------------------------
@@ -277,5 +282,6 @@ class ElectricBarometer:
         return (
             f"ElectricBarometer(models={model_names}, "
             f"cu={self.cu}, co={self.co}, tau={self.tau}, "
+            f"refit_on_full={self.refit_on_full}, "
             f"best_name_={best!r})"
         )

@@ -51,6 +51,17 @@ def test_electric_barometer_basic_fit_and_predict():
     # The index should contain the model names we passed in
     assert set(eb.results_.index) == set(models.keys())
 
+    # Validation metrics for the winning model should be populated
+    row = eb.results_.loc[eb.best_name_]
+
+    assert eb.validation_cwsl_ is not None
+    assert eb.validation_rmse_ is not None
+    assert eb.validation_wmape_ is not None
+
+    assert np.isclose(eb.validation_cwsl_, row["CWSL"])
+    assert np.isclose(eb.validation_rmse_, row["RMSE"])
+    assert np.isclose(eb.validation_wmape_, row["wMAPE"])
+
     # Predict on validation set and check shape
     y_pred = eb.predict(X_val)
     assert isinstance(y_pred, np.ndarray)
@@ -84,10 +95,17 @@ def test_electric_barometer_refit_on_full_runs():
         "linear": LinearRegression(),
     }
 
-    eb = ElectricBarometer(models=models, cu=2.0, co=1.0, tau=2.0)
+    # Enable refit_on_full at construction time
+    eb = ElectricBarometer(
+        models=models,
+        cu=2.0,
+        co=1.0,
+        tau=2.0,
+        refit_on_full=True,
+    )
 
     # This should run without error and refit the chosen model on full data
-    eb.fit(X_train, y_train, X_val, y_val, refit_on_full=True)
+    eb.fit(X_train, y_train, X_val, y_val)
 
     assert eb.best_name_ in models
     assert eb.best_model_ is not None
