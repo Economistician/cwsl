@@ -335,7 +335,67 @@ ElectricBarometer safely clones and evaluates each pipeline.
 
 ---
 
-# 9. scikit-learn Integration
+# 9. Model Engine Compatibility
+
+ElectricBarometer works with **any engine** implementing:
+
+```python
+fit(X, y)
+predict(X)
+```
+
+This includes:
+
+**scikit-learn models**
+- LinearRegression
+- RandomForestRegressor
+- GradientBoostingRegressor
+- SVM
+- Pipelines (scaler → model)
+
+**XGBoost (sklearn API)**
+
+```python
+from xgboost import XGBRegressor
+```
+
+**LightGBM (sklearn API)**
+
+```python
+from lightgbm import LGBMRegressor
+```
+
+**statsmodels (via adapter)**
+
+```python
+class StatsmodelsAdapter:
+    def __init__(self, model_class, **kwargs):
+        self.model_class = model_class
+        self.kwargs = kwargs
+
+    def fit(self, X, y):
+        self.fitted = self.model_class(y, **self.kwargs).fit()
+        return self
+
+    def predict(self, X):
+        return self.fitted.forecast(len(X))
+```
+
+**Custom / proprietary engines**
+
+```python
+class MyCustomModel:
+    def fit(self, X, y):
+        ...
+    def predict(self, X):
+        ...
+```
+
+ElectricBarometer is a **universal cost-aware selector** — plug in anything that can fit + predict.
+
+---
+
+# 10. scikit-learn Integration
 
 CWSL can be used directly as a scorer:
 
@@ -360,7 +420,7 @@ grid = GridSearchCV(
 
 ---
 
-# 10. Why CWSL Matters
+# 11. Why CWSL Matters
 
 Operational asymmetry is real:
 
@@ -381,7 +441,7 @@ If being “short” is worse than being “long,” CWSL is the correct metric.
 
 ---
 
-# 11. Domains
+# 12. Domains
 
 CWSL is used in:
 
@@ -396,7 +456,7 @@ CWSL is used in:
 
 ---
 
-# 12. Project Status
+# 13. Project Status
 
 ### Delivered
 - Core metric suite  
@@ -414,7 +474,7 @@ CWSL is used in:
 
 ---
 
-# 13. Contact
+# 14. Contact
 
 **Kyle Corrie (Economistician)**  
 Creator of CWSL and the Forecast Readiness Framework  
