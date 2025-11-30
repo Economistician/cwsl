@@ -376,6 +376,119 @@ structure.
 
 ---
 
+## ElectricBarometer — Unified Cost-Aware Model Selection
+
+`ElectricBarometer` is the unified, high-level model-selection engine built
+on top of CWSL. Instead of comparing models manually or relying on symmetric
+metrics like RMSE, ElectricBarometer automatically:
+
+1. Fits multiple candidate models  
+2. Predicts on a validation set  
+3. Computes CWSL, RMSE, and wMAPE  
+4. Selects the best model *based solely on operational cost*  
+5. Provides a clean comparison table and a ready-to-use fitted winner  
+
+It is the simplest path from “I have models” → “which one is best under my
+asymmetric costs?”.
+
+---
+
+### Why ElectricBarometer Exists
+
+Most models train using symmetric losses. But operational environments are
+not symmetric:
+
+- Under-forecasting (shortfalls) is costly  
+- Overbuilds are usually cheaper  
+- RMSE/MAPE hide this asymmetry entirely  
+
+ElectricBarometer makes the **asymmetric cost** the first-class decision
+criterion.
+
+---
+
+### Quick Example
+
+```python
+from sklearn.linear_model import LinearRegression
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.dummy import DummyRegressor
+from sklearn.model_selection import train_test_split
+
+import numpy as np
+from cwsl import ElectricBarometer
+
+# Synthetic data
+rng = np.random.RandomState(0)
+X = rng.randn(500, 3)
+y = 5.0 * X[:, 0] + rng.randn(500) * 0.3
+y = y - y.min() + 1.0   # ensure strictly positive for CWSL
+
+# Split into train/validation
+X_train, X_val, y_train, y_val = train_test_split(
+    X, y, test_size=0.3, random_state=0
+)
+
+# Candidate models
+models = {
+    "dummy": DummyRegressor(strategy="mean"),
+    "linear": LinearRegression(),
+    "rf": RandomForestRegressor(n_estimators=200, random_state=0),
+}
+
+# Cost ratio: shortfalls cost 2× more than overbuilds
+eb = ElectricBarometer(models=models, cu=2.0, co=1.0)
+
+# Fit and select the best model
+eb.fit(X_train, y_train, X_val, y_val)
+
+print("Best model:", eb.best_name_)
+print(eb.results_)
+y_pred = eb.predict(X_val)
+```
+
+ElectricBarometer selects the model with the **lowest CWSL**.
+
+### API Overview
+
+```python
+ElectricBarometer(models, cu=2.0, co=1.0, tau=2.0)
+```
+
+Attributes after .fit():
+
+- `best_name_` – name of the winning model
+- `best_model_` – the fitted best estimator
+- `results_` – pandas DataFrame (CWSL, RMSE, wMAPE)
+
+Methods:
+
+- `fit(X_train, y_train, X_val, y_val)`
+- `predict(X)`
+- `cwsl_score(y_true, y_pred)`
+
+### When to Use ElectricBarometer
+
+Use it when:
+
+- You have multiple candidate models
+- You care about asymmetric cost (shortfall > overbuild)
+- You want the model with the lowest operational loss, not lowest RMSE
+
+Typical domains:
+
+- QSR production forecasting
+- Retail availability / replenishment
+- Workforce scheduling
+- Manufacturing throughput
+- Supply chain / logistics
+- Energy load forecasting
+
+ElectricBarometer is essentially a **cost-aware AutoML selector** built for
+operational forecasting.
+
+---
+
 ## Why Sensitivity Analysis Matters
 
 One of the core strengths of CWSL is its ability to reveal how different forecast models behave
@@ -627,12 +740,19 @@ This project is under active development.
 - [X] Model comparison utilities  
 
 ### Planned for v0.2.0
-- [ ] More DataFrame utilities  
-- [ ] scikit-learn wrappers  
-- [ ] `plot_cwsl_breakdown()`  
+- [X] More DataFrame utilities  
+- [X] scikit-learn wrappers  
+- [X] `plot_cwsl_breakdown()`  
 - [X] Cost sensitivity analysis  
 - [X] CWSL model comparison suite  
-- [ ] Full documentation site  
+- [X] Full documentation site  
+
+### Planned / delivered in v0.3.0
+- [X] ElectricBarometer unified selector  
+- [X] scikit-learn wrappers (`cwsl_scorer`, selection helpers)  
+- [X] Keras-compatible CWSL loss  
+- [X] Cost sensitivity analysis  
+- [ ] Full documentation site 
 
 ---
 
