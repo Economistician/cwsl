@@ -112,9 +112,9 @@ class ElectricBarometer:
 
     results_ : pandas.DataFrame or None
         - In holdout mode: comparison table returned by `select_model_by_cwsl`,
-          with one row per candidate model.
-        - In cv mode: table of mean CV scores per model, with index
-          'model_name' and columns CWSL, RMSE, wMAPE.
+          with one row per candidate model (index = model name).
+        - In cv mode: table of mean CV scores per model (index = model name),
+          with columns CWSL, RMSE, wMAPE.
 
     validation_cwsl_ : float or None
         Validation CWSL of the winning model:
@@ -204,6 +204,7 @@ class ElectricBarometer:
         self,
         X: np.ndarray,
         y: np.ndarray,
+        sample_weight: Optional[np.ndarray] = None,
     ) -> pd.DataFrame:
         """
         Perform simple K-fold CV over the candidate models and return
@@ -213,11 +214,15 @@ class ElectricBarometer:
         ----------
         X : ndarray of shape (n_samples, n_features)
         y : ndarray of shape (n_samples,)
+        sample_weight : ndarray of shape (n_samples,), optional
+            Optional per-sample weights. If provided, they are subset
+            to each fold's validation indices and passed to the metric
+            functions.
 
         Returns
         -------
         results : DataFrame
-            Index: model_name
+            Index: model (model name)
             Columns: ["CWSL", "RMSE", "wMAPE"]
         """
         n_samples = X.shape[0]
@@ -260,6 +265,10 @@ class ElectricBarometer:
                 model.fit(X_tr, y_tr)
                 y_pred = model.predict(X_va)
 
+                sw_va = None
+                if sample_weight is not None:
+                    sw_va = np.asarray(sample_weight, dtype=float)[val_idx]
+
                 # Compute metrics for this fold
                 cwsl_scores.append(
                     cwsl(
@@ -267,31 +276,34 @@ class ElectricBarometer:
                         y_pred=y_pred,
                         cu=self.cu,
                         co=self.co,
+                        sample_weight=sw_va,
                     )
                 )
                 rmse_scores.append(
                     rmse(
                         y_true=y_va,
                         y_pred=y_pred,
+                        sample_weight=sw_va,
                     )
                 )
                 wmape_scores.append(
                     wmape(
                         y_true=y_va,
                         y_pred=y_pred,
+                        sample_weight=sw_va,
                     )
                 )
 
             rows.append(
                 {
-                    "model_name": model_name,
+                    "model": model_name,
                     "CWSL": float(np.mean(cwsl_scores)),
                     "RMSE": float(np.mean(rmse_scores)),
                     "wMAPE": float(np.mean(wmape_scores)),
                 }
             )
 
-        results = pd.DataFrame(rows).set_index("model_name")
+        results = pd.DataFrame(rows).set_index("model")
         return results
 
     # ------------------------------------------------------------------
@@ -328,7 +340,9 @@ class ElectricBarometer:
             - In cv mode: ignored.
 
         sample_weight_train : array-like of shape (n_samples_train,), optional
-            (Currently ignored in v0.3.x; reserved for future use.)
+            - In holdout mode: currently ignored (reserved for future use).
+            - In cv mode: treated as sample weights for the full dataset and
+              used in the metric calculations for each validation fold.
 
         sample_weight_val : array-like of shape (n_samples_val,), optional
             (Currently ignored in v0.3.x; reserved for future use.)
@@ -393,8 +407,12 @@ class ElectricBarometer:
             self.best_model_ = best_model_refit
 
         else:  # selection_mode == "cv"
-            # Run K-fold CV on X_train / y_train only
-            results = self._cv_evaluate_models(X_train, y_train)
+            # Run K-fold CV on X_train / y_train only (X_val, y_val ignored)
+            results = self._cv_evaluate_models(
+                X=X_train,
+                y=y_train,
+                sample_weight=sample_weight_train,
+            )
             self.results_ = results
 
             # Pick the winner by lowest mean CWSL
@@ -433,7 +451,7 @@ class ElectricBarometer:
         if self.best_model_ is None:
             raise RuntimeError(
                 "ElectricBarometer has not been fit yet. "
-                "Call .fit(X_train, y_train, X_val, y_val) first."
+                "Call .fit(...) first (holdout or cv mode)."
             )
 
         y_pred = self.best_model_.predict(X)

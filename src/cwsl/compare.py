@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Iterable, Mapping, Union, Dict, Any, Tuple
+from typing import Iterable, Mapping, Union, Dict, Any, Tuple, Optional
 
 import numpy as np
 import pandas as pd
@@ -220,5 +220,189 @@ def select_model_by_cwsl(
 
     if best_name is None or best_model is None:
         raise ValueError("No models were evaluated. Check the `models` dict.")
+
+    return best_name, best_model, results
+
+
+def select_model_by_cwsl_cv(
+    models: Dict[str, Any],
+    X,
+    y,
+    *,
+    cu: float,
+    co: float,
+    cv: int = 5,
+    sample_weight: Optional[np.ndarray] = None,
+) -> Tuple[str, Any, pd.DataFrame]:
+    """
+    Select a model by **cross-validated CWSL** instead of a single
+    train/validation split.
+
+    This is a simple K-fold CV engine that:
+
+      * Splits the data into `cv` folds.
+      * For each model and each fold:
+          - Fits on (K-1) folds.
+          - Evaluates on the held-out fold using CWSL, RMSE, and wMAPE.
+      * Averages metrics across folds for each model.
+      * Chooses the model with the **lowest mean CWSL**.
+      * Refits that winning model once on the **full dataset (X, y)**.
+
+    Parameters
+    ----------
+    models : dict[str, estimator]
+        Mapping from model name to an unfitted estimator object that
+        implements .fit(X, y) and .predict(X). These can be scikit-learn
+        style estimators or any object with that interface.
+
+    X : array-like of shape (n_samples, n_features)
+        Full feature matrix.
+
+    y : array-like of shape (n_samples,)
+        Target vector.
+
+    cu : float
+        Underbuild (shortfall) cost per unit for CWSL.
+
+    co : float
+        Overbuild (excess) cost per unit for CWSL.
+
+    cv : int, default 5
+        Number of CV folds. Must be >= 2.
+
+    sample_weight : array-like of shape (n_samples,), optional
+        Optional per-sample weights used **only in the metric
+        calculations**. For now, training itself is always unweighted.
+
+    Returns
+    -------
+    best_name : str
+        Name of the model with the lowest mean CWSL across folds.
+
+    best_model : estimator
+        The estimator trained on **all (X, y)** for the chosen model.
+
+    results : pandas.DataFrame
+        DataFrame indexed by model name with columns:
+
+            - 'CWSL_mean', 'CWSL_std'
+            - 'RMSE_mean', 'RMSE_std'
+            - 'wMAPE_mean', 'wMAPE_std'
+            - 'n_folds'
+
+    Notes
+    -----
+    - This implementation avoids importing scikit-learn and uses a simple
+      numpy-based K-fold splitter.
+    - The original `models` dict is mutated: each estimator is fitted
+      multiple times during CV and once more on (X, y) for the winner,
+      mirroring the behavior of `select_model_by_cwsl`.
+    """
+    X_arr = np.asarray(X)
+    y_arr = np.asarray(y, dtype=float)
+
+    if X_arr.shape[0] != y_arr.shape[0]:
+        raise ValueError(
+            f"X and y must have the same number of rows; got {X_arr.shape[0]} and {y_arr.shape[0]}"
+        )
+
+    n_samples = X_arr.shape[0]
+    if cv < 2:
+        raise ValueError(f"cv must be at least 2; got {cv}")
+
+    indices = np.arange(n_samples)
+    folds = np.array_split(indices, cv)
+
+    if sample_weight is not None:
+        sw_arr = np.asarray(sample_weight, dtype=float)
+        if sw_arr.shape[0] != n_samples:
+            raise ValueError(
+                f"sample_weight must have length {n_samples}; got {sw_arr.shape[0]}"
+            )
+    else:
+        sw_arr = None
+
+    rows = []
+    best_name: str | None = None
+    best_model: Any | None = None
+    best_cwsl_mean = np.inf
+
+    for name, model in models.items():
+        cwsl_scores = []
+        rmse_scores = []
+        wmape_scores = []
+
+        for i, val_idx in enumerate(folds):
+            train_idx = np.concatenate([f for j, f in enumerate(folds) if j != i])
+
+            X_train = X_arr[train_idx]
+            y_train = y_arr[train_idx]
+            X_val = X_arr[val_idx]
+            y_val = y_arr[val_idx]
+
+            if sw_arr is not None:
+                sw_train = sw_arr[train_idx]
+                sw_val = sw_arr[val_idx]
+            else:
+                sw_train = None
+                sw_val = None
+
+            # Fit the model on this fold's training data (unweighted for now)
+            fitted = model.fit(X_train, y_train)
+
+            # Predict on validation fold
+            y_pred_val = np.asarray(fitted.predict(X_val), dtype=float)
+
+            # Metrics for this fold (weights only in metrics)
+            cwsl_val = cwsl(
+                y_true=y_val,
+                y_pred=y_pred_val,
+                cu=cu,
+                co=co,
+                sample_weight=sw_val,
+            )
+            rmse_val = rmse(
+                y_true=y_val,
+                y_pred=y_pred_val,
+                sample_weight=sw_val,
+            )
+            wmape_val = wmape(
+                y_true=y_val,
+                y_pred=y_pred_val,
+                sample_weight=sw_val,
+            )
+
+            cwsl_scores.append(cwsl_val)
+            rmse_scores.append(rmse_val)
+            wmape_scores.append(wmape_val)
+
+        cwsl_scores_arr = np.asarray(cwsl_scores, dtype=float)
+        rmse_scores_arr = np.asarray(rmse_scores, dtype=float)
+        wmape_scores_arr = np.asarray(wmape_scores, dtype=float)
+
+        row = {
+            "model": name,
+            "CWSL_mean": float(np.mean(cwsl_scores_arr)),
+            "CWSL_std": float(np.std(cwsl_scores_arr, ddof=0)),
+            "RMSE_mean": float(np.mean(rmse_scores_arr)),
+            "RMSE_std": float(np.std(rmse_scores_arr, ddof=0)),
+            "wMAPE_mean": float(np.mean(wmape_scores_arr)),
+            "wMAPE_std": float(np.std(wmape_scores_arr, ddof=0)),
+            "n_folds": cv,
+        }
+        rows.append(row)
+
+        if row["CWSL_mean"] < best_cwsl_mean:
+            best_cwsl_mean = row["CWSL_mean"]
+            best_name = name
+            best_model = model  # will refit on full data below
+
+    results = pd.DataFrame(rows).set_index("model")
+
+    if best_name is None or best_model is None:
+        raise ValueError("No models were evaluated. Check the `models` dict.")
+
+    # Final refit of the best model on *all* data
+    best_model.fit(X_arr, y_arr)
 
     return best_name, best_model, results
