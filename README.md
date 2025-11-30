@@ -467,6 +467,33 @@ Methods:
 - `predict(X)`
 - `cwsl_score(y_true, y_pred)`
 
+### Refitting the winner on all available data
+
+In many real deployments, you want to:
+
+1. Use a validation split to **choose** the best model by CWSL, then  
+2. **Refit the winner** on all available data before going live.
+
+ElectricBarometer supports this directly:
+
+```python
+from cwsl import ElectricBarometer
+
+eb = ElectricBarometer(models=models, cu=2.0, co=1.0)
+
+# Use (X_train, y_train) and (X_val, y_val) to select the best model by CWSL,
+# then refit that winner on the concatenated dataset (train ∪ val).
+eb.fit(
+    X_train,
+    y_train,
+    X_val,
+    y_val,
+    refit_on_full=True,
+)
+
+y_pred = eb.predict(X_test)
+```
+
 ### When to Use ElectricBarometer
 
 Use it when:
