@@ -170,3 +170,59 @@ def test_evaluate_groups_df_matches_direct_metrics():
 
     for name, val in expected.items():
         assert np.isclose(row[name], val)
+
+
+def test_evaluate_groups_df_with_per_row_cu_co():
+    """
+    Ensure evaluate_groups_df can consume per-row cu/co (via column names)
+    and that a group with more expensive shortfalls ends up with a higher
+    CWSL than one with cheaper shortfalls, all else equal.
+    """
+    rows = []
+
+    # Entity A: always over-forecast (more overbuild), cheap shortfall
+    for t, y in enumerate([10, 12, 15], start=1):
+        rows.append(
+            {
+                "entity": "A",
+                "t": t,
+                "actual_qty": y,
+                "forecast_qty": y + 2,  # always a bit high
+                "cu": 1.0,              # shortfall cost (cheap)
+                "co": 1.0,
+            }
+        )
+
+    # Entity B: always under-forecast (more shortfall), expensive shortfall
+    for t, y in enumerate([10, 12, 15], start=1):
+        rows.append(
+            {
+                "entity": "B",
+                "t": t,
+                "actual_qty": y,
+                "forecast_qty": y - 2,  # always a bit low
+                "cu": 3.0,              # shortfall cost (expensive)
+                "co": 1.0,
+            }
+        )
+
+    df = pd.DataFrame(rows)
+
+    result = evaluate_groups_df(
+        df=df,
+        group_cols=["entity"],
+        actual_col="actual_qty",
+        forecast_col="forecast_qty",
+        cu="cu",   # per-row cu
+        co="co",   # per-row co
+        tau=2.0,
+    )
+
+    # We expect one row per entity
+    assert set(result["entity"]) == {"A", "B"}
+
+    # CWSL should be higher for entity B, where shortfalls are more expensive
+    cwsl_A = float(result.loc[result["entity"] == "A", "CWSL"].iloc[0])
+    cwsl_B = float(result.loc[result["entity"] == "B", "CWSL"].iloc[0])
+
+    assert cwsl_B > cwsl_A
