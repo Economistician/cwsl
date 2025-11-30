@@ -22,6 +22,8 @@ class ElectricBarometer:
           - CWSL (with your cu/co),
           - plus reference metrics (RMSE, wMAPE, etc.).
       * Selects the validation winner by **minimizing CWSL**.
+      * Optionally refits the winning model on all available data
+        (train ∪ validation) before exposing it via .best_model_.
       * Exposes a clean .fit() / .predict() API and a results_ DataFrame.
 
     Parameters
@@ -59,7 +61,9 @@ class ElectricBarometer:
         Name of the selected best model after .fit().
 
     best_model_ : Any or None
-        The selected model object itself (fitted).
+        The selected model object itself (fitted). If refit_on_full=True
+        (either at init or in the .fit() override), this is the model
+        trained on all available data.
 
     results_ : pandas.DataFrame or None
         Comparison table returned by `select_model_by_cwsl`, with one row
@@ -134,6 +138,7 @@ class ElectricBarometer:
         y_val: np.ndarray,
         sample_weight_train: Optional[np.ndarray] = None,
         sample_weight_val: Optional[np.ndarray] = None,
+        refit_on_full: Optional[bool] = None,
     ) -> "ElectricBarometer":
         """
         Fit all candidate models and select the best one using CWSL.
@@ -148,12 +153,18 @@ class ElectricBarometer:
             (Currently ignored in v0.3.x; reserved for future use.)
         sample_weight_val : array-like of shape (n_samples_val,), optional
             (Currently ignored in v0.3.x; reserved for future use.)
+        refit_on_full : bool, optional
+            If provided, overrides the instance-level refit_on_full flag for
+            this .fit() call only. If None, uses self.refit_on_full.
 
         Returns
         -------
         self : ElectricBarometer
             The fitted selector, with best_model_ and results_ populated.
         """
+        # Decide whether to refit on full data for this call
+        refit_flag = self.refit_on_full if refit_on_full is None else bool(refit_on_full)
+
         # NOTE: select_model_by_cwsl currently does NOT accept sample_weight args,
         # so we ignore sample_weight_train/sample_weight_val here in v0.3.x.
         best_name, best_model, results = select_model_by_cwsl(
@@ -190,15 +201,29 @@ class ElectricBarometer:
 
         # Optionally refit the winning model on all available data
         best_model_refit = best_model
-        if self.refit_on_full:
+        if refit_flag and hasattr(best_model_refit, "fit"):
             X_full = np.concatenate([X_train, X_val], axis=0)
             y_full = np.concatenate([y_train, y_val], axis=0)
 
-            # For now we do not attempt to handle sample_weight here; most
-            # standard regressors accept .fit(X, y) without weights.
-            if hasattr(best_model_refit, "fit"):
-                best_model_refit = best_model_refit.__class__(**getattr(best_model_refit, "get_params", lambda: {})())
-                best_model_refit.fit(X_full, y_full)
+            # Try to use sklearn.clone if available; otherwise, fall back
+            # to a naive re-instantiation via get_params.
+            cloned = None
+            try:
+                from sklearn.base import clone  # type: ignore
+
+                cloned = clone(best_model_refit)
+            except Exception:
+                cloned = None
+
+            if cloned is not None:
+                best_model_refit = cloned
+            else:
+                # Fallback: re-create using class + get_params (if present)
+                if hasattr(best_model_refit, "get_params"):
+                    params = best_model_refit.get_params()
+                    best_model_refit = best_model_refit.__class__(**params)
+
+            best_model_refit.fit(X_full, y_full)
 
         self.best_model_ = best_model_refit
         return self

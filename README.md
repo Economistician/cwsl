@@ -333,6 +333,84 @@ This keeps training completely standard (RMSE-style loss inside each model),
 but uses **CWSL as the referee** when choosing which model is operationally
 best under asymmetric costs.
 
+---
+
+---
+
+## ElectricBarometer Enhancements (v0.3.x)
+
+`ElectricBarometer` now includes two production-oriented capabilities that make
+it a complete cost-aware model selection and finalization tool:
+
+### 1. Validation Metrics (`validation_cwsl_`, `validation_rmse_`, `validation_wmape_`)
+
+After calling `.fit()`, the selector stores the validation performance of the
+winning model:
+
+- `validation_cwsl_` – CWSL on the validation set  
+- `validation_rmse_` – RMSE on the validation set  
+- `validation_wmape_` – weighted MAPE on the validation set  
+
+You can access them directly:
+
+```python
+print("Validation CWSL:", eb.validation_cwsl_)
+print("Validation RMSE:", eb.validation_rmse_)
+print("Validation wMAPE:", eb.validation_wmape_)
+```
+
+These mirror scikit-learn’s `best_score_` pattern and make post-selection
+diagnostics effortless.
+
+### 2. Optional Full Refit `(refit_on_full=True)`
+
+In many real workflows, once you identify the best model using the validation
+set, the final estimator should be trained on **all available data**.
+
+Enable this by passing:
+
+```python
+eb.fit(
+    X_train, y_train,
+    X_val, y_val,
+    refit_on_full=True,
+)
+```
+
+Behavior:
+
+1. All candidate models train on (X_train, y_train)
+2. ElectricBarometer selects the winner by minimum validation CWSL
+3. If refit_on_full=True, the winning estimator is retrained on:
+
+```ini
+X_full = concat(X_train, X_val)
+y_full = concat(y_train, y_val)
+```
+
+This provides unbiased model selection and full-data finalization—ideal for
+production deployment.
+
+```python
+models = {
+    "linear": LinearRegression(),
+    "rf": RandomForestRegressor(random_state=0),
+}
+
+eb = ElectricBarometer(models=models, cu=2.0, co=1.0)
+
+eb.fit(
+    X_train, y_train,
+    X_val, y_val,
+    refit_on_full=True,
+)
+
+print("Selected model:", eb.best_name_)
+print("Validation CWSL:", eb.validation_cwsl_)
+```
+
+---
+
 ## Using CWSL as a scorer in scikit-learn
 
 You can also plug CWSL directly into scikit-learn search utilities
