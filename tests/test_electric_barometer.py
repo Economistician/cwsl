@@ -60,3 +60,43 @@ def test_electric_barometer_basic_fit_and_predict():
     cwsl_val = eb.cwsl_score(y_true=y_val, y_pred=y_pred)
     assert np.isfinite(cwsl_val)
     assert cwsl_val >= 0.0
+
+
+def test_electric_barometer_refit_on_full_runs():
+    rng = np.random.RandomState(42)
+
+    n_samples = 120
+    n_features = 2
+
+    X = rng.randn(n_samples, n_features)
+    noise = rng.randn(n_samples) * 0.1
+    y_raw = 3.0 * X[:, 0] - 2.0 * X[:, 1] + noise
+
+    # Shift to strictly positive "demand"
+    y = y_raw - y_raw.min() + 1.0
+
+    # Simple 80/40 split
+    X_train, X_val = X[:80], X[80:]
+    y_train, y_val = y[:80], y[80:]
+
+    models = {
+        "dummy_mean": DummyRegressor(strategy="mean"),
+        "linear": LinearRegression(),
+    }
+
+    eb = ElectricBarometer(models=models, cu=2.0, co=1.0, tau=2.0)
+
+    # This should run without error and refit the chosen model on full data
+    eb.fit(X_train, y_train, X_val, y_val, refit_on_full=True)
+
+    assert eb.best_name_ in models
+    assert eb.best_model_ is not None
+
+    # Predictions on the validation set should still be well-formed
+    y_pred_val = eb.predict(X_val)
+    assert isinstance(y_pred_val, np.ndarray)
+    assert y_pred_val.shape == y_val.shape
+
+    cwsl_val = eb.cwsl_score(y_true=y_val, y_pred=y_pred_val)
+    assert np.isfinite(cwsl_val)
+    assert cwsl_val >= 0.0
