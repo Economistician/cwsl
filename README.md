@@ -468,6 +468,54 @@ grid = GridSearchCV(
 
 ---
 
+# 12. CWSLRegressor -- Cost-Aware Ensemble Model Selector
+
+`CWSLRegressor` is a scikit-learn–compatible estimator that evaluates multiple candidate models and automatically selects the one that minimizes **CWSL** on validation data.
+
+It acts as a **drop-in forecasting model** that is cost-optimized and operationally aligned.
+
+**Key Features**
+
+- Accepts any models with `fit()` and `predict()`
+- Uses **CWSL**, RMSE, and wMAPE for evaluation
+- Supports **holdout** or **cross-validation** selection
+- Optionally refits the winning model on the full dataset
+- Fully sklearn-compatible (`fit/predict/get_params`)
+
+**Basic Example**
+
+```python
+from cwsl import CWSLRegressor
+from sklearn.linear_model import LinearRegression
+from sklearn.ensemble import RandomForestRegressor
+
+models = {
+    "linear": LinearRegression(),
+    "rf": RandomForestRegressor(n_estimators=200, random_state=0),
+}
+
+reg = CWSLRegressor(
+    models=models,
+    cu=2.0,
+    co=1.0,
+    selection_mode="cv",
+    cv=3,
+)
+
+reg.fit(X_train, y_train)
+y_pred = reg.predict(X_test)
+
+print("Selected model:", reg.best_name_)
+```
+
+**Why use CWSLRegressor?**
+
+- Makes **model selection align with operational cost**, not generic RMSE
+- Works seamlessly with traditional ML models, ensembles, pipelines, and adapters
+- Reduces the risk of choosing a model that performs well statistically but poorly operationally
+
+---
+
 # 12. Why CWSL Matters
 
 Operational asymmetry is real:
