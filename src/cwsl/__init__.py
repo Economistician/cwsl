@@ -46,6 +46,8 @@ from .electric_barometer import (
     SarimaxAdapter,
 )
 
+from .cwsl_regressor import CWSLRegressor
+
 __all__ = [
     # Core metrics
     "cwsl",
@@ -86,4 +88,6 @@ __all__ = [
     "BaseAdapter",
     "ProphetAdapter",
     "SarimaxAdapter",
+
+    "CWSLRegressor",
 ]
