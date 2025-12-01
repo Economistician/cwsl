@@ -417,6 +417,7 @@ Built-in adapters
 
 - **ProphetAdapter** -- wraps `prophet.Prophet`
 - **SarimaxAdapter** -- wraps `statsmodels.tsa.statespace.SARIMAX`
+- **AarimaAdapter** -- wraps `statsmodels.tsa.arima.model.ARIMA`
 
 Example:
 
@@ -569,6 +570,7 @@ CWSL is used in:
 - Keras-compatible CWSL loss  
 - ElectricBarometer unified selector  
 - Pipeline support  
+- Adapters (Prophet, SARIMAX, ARIMA, LightGBM, CatBoost)
 - Cross-validation selection  
 
 ### Planned
