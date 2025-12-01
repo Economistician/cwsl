@@ -18,6 +18,14 @@ try:
 except Exception:
     HAS_XGB = False
 
+# Optional LightGBM support
+try:
+    from lightgbm import LGBMRegressor  # type: ignore
+
+    HAS_LGBM = True
+except Exception:
+    HAS_LGBM = False
+
 # Optional Prophet support
 HAS_PROPHET = importlib.util.find_spec("prophet") is not None
 
@@ -376,6 +384,66 @@ def test_electric_barometer_xgboost_engine():
     assert eb.validation_cwsl_ >= 0.0
 
     # Predict and score
+    y_pred = eb.predict(X_val)
+    assert isinstance(y_pred, np.ndarray)
+    assert y_pred.shape == y_val.shape
+
+    cwsl_val = eb.cwsl_score(y_true=y_val, y_pred=y_pred)
+    assert np.isfinite(cwsl_val)
+    assert cwsl_val >= 0.0
+
+
+@pytest.mark.skipif(not HAS_LGBM, reason="lightgbm is not installed")
+def test_electric_barometer_lightgbm_engine():
+    """EB should work with LGBMRegressor via its sklearn API when available."""
+    rng = np.random.RandomState(33)
+    n_samples = 220
+    n_features = 4
+
+    X, y = _make_positive_regression(
+        rng,
+        n_samples=n_samples,
+        n_features=n_features,
+        coef_first=3.5,
+    )
+
+    # Train/validation split
+    X_train, X_val = X[:180], X[180:]
+    y_train, y_val = y[:180], y[180:]
+
+    models = {
+        "dummy_mean": DummyRegressor(strategy="mean"),
+        "lgbm": LGBMRegressor(
+            n_estimators=60,
+            max_depth=-1,
+            learning_rate=0.1,
+            subsample=0.9,
+            colsample_bytree=0.9,
+            random_state=0,
+        ),
+    }
+
+    eb = ElectricBarometer(
+        models=models,
+        cu=2.0,
+        co=1.0,
+        tau=2.0,
+        selection_mode="holdout",
+        refit_on_full=False,
+    )
+
+    eb.fit(X_train, y_train, X_val, y_val)
+
+    assert eb.best_name_ in models
+    assert eb.best_model_ is not None
+
+    assert isinstance(eb.results_, pd.DataFrame)
+    assert set(eb.results_.index) == set(models.keys())
+
+    assert eb.validation_cwsl_ is not None
+    assert np.isfinite(eb.validation_cwsl_)
+    assert eb.validation_cwsl_ >= 0.0
+
     y_pred = eb.predict(X_val)
     assert isinstance(y_pred, np.ndarray)
     assert y_pred.shape == y_val.shape
