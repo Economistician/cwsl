@@ -41,7 +41,9 @@ from .training import make_cwsl_keras_loss
 
 from .electric_barometer import (
     ElectricBarometer, 
-    BaseAdapter
+    BaseAdapter,
+    ProphetAdapter,
+    SarimaxAdapter,
 )
 
 __all__ = [
@@ -82,4 +84,6 @@ __all__ = [
     # High-level engine
     "ElectricBarometer",
     "BaseAdapter",
+    "ProphetAdapter",
+    "SarimaxAdapter",
 ]

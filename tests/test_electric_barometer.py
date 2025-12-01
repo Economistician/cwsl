@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import importlib.util
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -16,7 +18,13 @@ try:
 except Exception:
     HAS_XGB = False
 
-from cwsl import ElectricBarometer
+# Optional Prophet support
+HAS_PROPHET = importlib.util.find_spec("prophet") is not None
+
+# Optional statsmodels support
+HAS_STATSMODELS = importlib.util.find_spec("statsmodels") is not None
+
+from cwsl import ElectricBarometer, ProphetAdapter, SarimaxAdapter
 
 
 def _make_positive_regression(
@@ -436,5 +444,123 @@ def test_electric_barometer_with_adapter_model():
     assert y_pred.shape == y.shape
 
     cwsl_val = eb.cwsl_score(y_true=y, y_pred=y_pred)
+    assert np.isfinite(cwsl_val)
+    assert cwsl_val >= 0.0
+
+
+@pytest.mark.skipif(not HAS_PROPHET, reason="prophet is not installed")
+def test_prophet_adapter_with_electric_barometer():
+    """
+    Ensure ProphetAdapter can plug into ElectricBarometer and run end-to-end
+    when the optional 'prophet' dependency is available.
+    """
+    rng = np.random.RandomState(77)
+
+    # Simple synthetic daily time series
+    n_samples = 80
+
+    # Explicit start date for datetime64 arithmetic
+    start = np.datetime64("2020-01-01")
+    dates = start + np.arange(n_samples).astype("timedelta64[D]")
+
+    # Synthetic signal
+    trend = np.linspace(50, 70, n_samples)
+    noise = rng.randn(n_samples) * 0.5
+    y = trend + noise
+
+    # Train/validation split (ProphetAdapter ignores X but requires shape)
+    X = dates  # unused inputs beyond timestamps
+    X_train, X_val = X[:60], X[60:]
+    y_train, y_val = y[:60], y[60:]
+
+    models = {
+        "dummy_mean": DummyRegressor(strategy="mean"),
+        "prophet": ProphetAdapter(),
+    }
+
+    eb = ElectricBarometer(
+        models=models,
+        cu=2.0,
+        co=1.0,
+        tau=2.0,
+        selection_mode="holdout",
+        refit_on_full=False,
+    )
+
+    eb.fit(X_train.reshape(-1, 1), y_train, X_val.reshape(-1, 1), y_val)
+
+    assert eb.best_name_ in models
+    assert eb.best_model_ is not None
+    assert isinstance(eb.results_, pd.DataFrame)
+    assert set(eb.results_.index) == set(models.keys())
+
+    y_pred = eb.predict(X_val.reshape(-1, 1))
+    assert isinstance(y_pred, np.ndarray)
+    assert y_pred.shape == y_val.shape
+
+    cwsl_val = eb.cwsl_score(y_true=y_val, y_pred=y_pred)
+    assert np.isfinite(cwsl_val)
+    assert cwsl_val >= 0.0
+
+
+@pytest.mark.skipif(not HAS_STATSMODELS, reason="statsmodels is not installed")
+def test_sarimax_adapter_with_electric_barometer():
+    """
+    Ensure SarimaxAdapter can plug into ElectricBarometer and run end-to-end.
+
+    The adapter conceptually uses y as the univariate series and may ignore
+    X entirely or treat it as exogenous features. From the EB side, we just
+    need a clean fit/predict cycle with the right shapes and finite CWSL.
+    """
+    rng = np.random.RandomState(2025)
+
+    n_samples = 80
+
+    # X is just an index placeholder; SarimaxAdapter can ignore or use as exog
+    X = np.arange(n_samples).reshape(-1, 1)
+
+    # Simple synthetic strictly positive series
+    base = 20.0 + 0.1 * np.arange(n_samples)
+    noise = rng.randn(n_samples) * 2.0
+    y = base + noise
+    y = y - y.min() + 1.0
+
+    # Holdout split
+    X_train, X_val = X[:60], X[60:]
+    y_train, y_val = y[:60], y[60:]
+
+    models = {
+        "dummy": DummyRegressor(strategy="mean"),
+        "sarimax": SarimaxAdapter(order=(1, 0, 0)),
+    }
+
+    eb = ElectricBarometer(
+        models=models,
+        cu=2.0,
+        co=1.0,
+        tau=2.0,
+        selection_mode="holdout",
+        refit_on_full=False,
+    )
+
+    eb.fit(X_train, y_train, X_val, y_val)
+
+    assert eb.best_name_ in models
+    assert eb.best_model_ is not None
+
+    assert isinstance(eb.results_, pd.DataFrame)
+    assert set(eb.results_.index) == set(models.keys())
+
+    # Validation CWSL for winner should be finite and non-negative
+    assert eb.validation_cwsl_ is not None
+    assert np.isfinite(eb.validation_cwsl_)
+    assert eb.validation_cwsl_ >= 0.0
+
+    # Predictions on validation set
+    y_pred = eb.predict(X_val)
+    assert isinstance(y_pred, np.ndarray)
+    assert y_pred.shape == y_val.shape
+
+    cwsl_val = eb.cwsl_score(y_true=y_val, y_pred=y_pred)
     assert np.isfinite(cwsl_val)
     assert cwsl_val >= 0.0

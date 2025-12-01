@@ -92,6 +92,221 @@ class BaseAdapter:
         )
 
 
+class ProphetAdapter(BaseAdapter):
+    """
+    Adapter for `prophet.Prophet` so it can be used inside ElectricBarometer.
+
+    Assumptions
+    -----------
+    * X encodes the time index:
+        - shape (n_samples,) of datetime-like values, or
+        - shape (n_samples, n_features) where the *first column* is datetime-like.
+    * y is a 1D array-like of numeric targets (demand, load, etc).
+
+    Behavior
+    --------
+    - At fit-time, constructs a DataFrame with columns:
+          ds = timestamps from X
+          y  = targets from y
+      and calls `Prophet.fit(df)`.
+
+    - At predict-time, constructs a DataFrame with:
+          ds = timestamps from X
+      and returns the Prophet `yhat` column as a 1D numpy array.
+
+    Optional dependency
+    -------------------
+    Prophet is not required for CWSL itself. If the `prophet` package is not
+    installed, constructing ProphetAdapter() will raise an ImportError with a
+    helpful message.
+
+    You can also pass an already-configured Prophet instance:
+
+        from prophet import Prophet
+        base = Prophet(...)
+        adapter = ProphetAdapter(model=base)
+    """
+
+    def __init__(self, model: Optional[Any] = None) -> None:
+        if model is None:
+            try:
+                from prophet import Prophet as _Prophet  # type: ignore
+            except Exception as e:  # pragma: no cover - import failure path
+                raise ImportError(
+                    "ProphetAdapter requires the optional 'prophet' package. "
+                    "Install it via `pip install prophet`."
+                ) from e
+
+            model = _Prophet()
+
+        self.model = model
+
+    def fit(
+        self,
+        X: np.ndarray,
+        y: np.ndarray,
+        sample_weight: Optional[np.ndarray] = None,  # ignored
+    ) -> "ProphetAdapter":
+        # Local import to avoid hard dependency at module import time
+        import pandas as _pd
+
+        X_arr = np.asarray(X)
+        # Use the first column if 2D
+        if X_arr.ndim > 1:
+            X_arr = X_arr[:, 0]
+
+        ds = _pd.to_datetime(X_arr)
+        y_arr = np.asarray(y, dtype=float)
+
+        df = _pd.DataFrame({"ds": ds, "y": y_arr})
+        self.model.fit(df)
+        return self
+
+    def predict(self, X: np.ndarray) -> np.ndarray:
+        import pandas as _pd
+
+        X_arr = np.asarray(X)
+        if X_arr.ndim > 1:
+            X_arr = X_arr[:, 0]
+
+        ds = _pd.to_datetime(X_arr)
+        df_future = _pd.DataFrame({"ds": ds})
+        forecast = self.model.predict(df_future)
+
+        if "yhat" not in forecast.columns:
+            raise RuntimeError(
+                "ProphetAdapter: expected 'yhat' column in forecast output."
+            )
+
+        return np.asarray(forecast["yhat"], dtype=float)
+
+
+# Optional statsmodels / SARIMAX support
+try:  # pragma: no cover - import guard
+    import statsmodels.api as _sm  # type: ignore[import]
+
+    HAS_STATSMODELS = True
+except Exception:  # pragma: no cover - import guard
+    _sm = None
+    HAS_STATSMODELS = False
+
+
+class SarimaxAdapter(BaseAdapter):
+    """
+    Adapter for statsmodels SARIMAX to make it EB-compatible.
+
+    This wrapper:
+
+      - Ignores X entirely (as is typical for univariate SARIMAX).
+      - Fits on y as a simple time series.
+      - On predict(X_val), it forecasts len(X_val) steps ahead from the end
+        of the training series.
+
+    This is enough to let ElectricBarometer perform holdout or CV selection
+    *without* EB needing to know anything about statsmodels.
+
+    Parameters
+    ----------
+    order : tuple, default (1, 0, 0)
+        ARIMA (p, d, q) order.
+
+    seasonal_order : tuple, default (0, 0, 0, 0)
+        Seasonal (P, D, Q, s) order.
+
+    trend : str or None, default None
+        Trend parameter passed to SARIMAX.
+
+    enforce_stationarity, enforce_invertibility : bool, default True
+        Passed through to SARIMAX.
+    """
+
+    def __init__(
+        self,
+        order: tuple[int, int, int] = (1, 0, 0),
+        seasonal_order: tuple[int, int, int, int] = (0, 0, 0, 0),
+        trend: Optional[str] = None,
+        enforce_stationarity: bool = True,
+        enforce_invertibility: bool = True,
+    ) -> None:
+        super().__init__()
+        self.order = order
+        self.seasonal_order = seasonal_order
+        self.trend = trend
+        self.enforce_stationarity = enforce_stationarity
+        self.enforce_invertibility = enforce_invertibility
+
+        self._result = None
+
+        if not HAS_STATSMODELS:
+            # We delay the actual failure until fit(), but this is a clear signal.
+            # Users can skip tests or avoid instantiating this adapter if they
+            # don't have statsmodels installed.
+            pass
+
+    def fit(
+        self,
+        X: np.ndarray,
+        y: np.ndarray,
+        sample_weight: Optional[np.ndarray] = None,
+    ) -> "SarimaxAdapter":
+        if not HAS_STATSMODELS:
+            raise ImportError(
+                "SarimaxAdapter requires 'statsmodels' to be installed. "
+                "Install it with `pip install statsmodels`."
+            )
+
+        y_arr = np.asarray(y, dtype=float)
+
+        # Basic univariate SARIMAX on y only.
+        model = _sm.tsa.statespace.SARIMAX(
+            y_arr,
+            order=self.order,
+            seasonal_order=self.seasonal_order,
+            trend=self.trend,
+            enforce_stationarity=self.enforce_stationarity,
+            enforce_invertibility=self.enforce_invertibility,
+        )
+
+        # Use a small maxiter to keep tests lightweight.
+        self._result = model.fit(disp=False, maxiter=50)
+        return self
+
+    def predict(self, X: np.ndarray) -> np.ndarray:
+        if self._result is None:
+            raise RuntimeError(
+                "SarimaxAdapter has not been fit yet. Call .fit(X, y) first."
+            )
+
+        n_steps = len(X)
+        if n_steps <= 0:
+            return np.array([], dtype=float)
+
+        # Forecast n_steps ahead from the end of the training sample.
+        forecast = self._result.forecast(steps=n_steps)
+        return np.asarray(forecast, dtype=float)
+
+    # Minimal param API so sklearn.clone or our _clone_model can reconstruct it.
+    def get_params(self, deep: bool = True) -> dict:
+        return {
+            "order": self.order,
+            "seasonal_order": self.seasonal_order,
+            "trend": self.trend,
+            "enforce_stationarity": self.enforce_stationarity,
+            "enforce_invertibility": self.enforce_invertibility,
+        }
+
+    def set_params(self, **params):
+        for k, v in params.items():
+            setattr(self, k, v)
+        return self
+
+    def __repr__(self) -> str:
+        return (
+            f"SarimaxAdapter(order={self.order}, "
+            f"seasonal_order={self.seasonal_order}, trend={self.trend!r})"
+        )
+
+
 class ElectricBarometer:
     """
     ElectricBarometer: cost-aware model selector built on CWSL.
@@ -228,9 +443,7 @@ class ElectricBarometer:
             )
 
         if selection_mode == "cv" and (cv is None or cv < 2):
-            raise ValueError(
-                f"In CV mode, cv must be at least 2; got {cv!r}."
-            )
+            raise ValueError(f"In CV mode, cv must be at least 2; got {cv!r}.")
 
         self.models: Dict[str, Any] = models
         self.cu: float = float(cu)
