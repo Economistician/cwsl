@@ -1,6 +1,4 @@
 # CWSL — Cost-Weighted Service Loss  
-A Framework for Operationally-Aligned Forecast Evaluation
-
 [![license](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 ![status](https://img.shields.io/badge/status-active-brightgreen)
 
@@ -396,6 +394,14 @@ ElectricBarometer is a **universal cost-aware selector** — plug in anything th
 ---
 
 # 10. Model Engine Compatibility (Adapters)
+
+ElectricBarometer includes built-in adapters for engines that do not follow `fit/predict` (Prophet, SARIMAX), and also supports modern gradient-boosting frameworks that *do* expose sklearn-style APIs:
+
+- **XGBoost** (`XGBRegressor`)
+- **LightGBM** (`LGBMRegressor`)
+- **CatBoost** (`CatBoostRegressor`)
+
+If a model can run inside a scikit-learn pipeline, it can run inside ElectricBarometer.
 
 ElectricBarometer works with any model exposing:
 

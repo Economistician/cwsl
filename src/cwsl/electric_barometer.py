@@ -181,7 +181,7 @@ class ProphetAdapter(BaseAdapter):
         return np.asarray(forecast["yhat"], dtype=float)
 
 
-# Optional statsmodels / SARIMAX support
+# Optional statsmodels / SARIMAX / ARIMA support
 try:  # pragma: no cover - import guard
     import statsmodels.api as _sm  # type: ignore[import]
 
@@ -305,6 +305,97 @@ class SarimaxAdapter(BaseAdapter):
             f"SarimaxAdapter(order={self.order}, "
             f"seasonal_order={self.seasonal_order}, trend={self.trend!r})"
         )
+
+
+class ArimaAdapter(BaseAdapter):
+    """
+    Adapter for statsmodels ARIMA to make it EB-compatible.
+
+    This wrapper:
+
+      - Ignores X entirely (univariate time-series model).
+      - Fits on y as a simple ARIMA(p, d, q) series.
+      - On predict(X_val), it forecasts len(X_val) steps ahead from the end
+        of the training series.
+
+    That is enough for ElectricBarometer to perform holdout or CV selection
+    without knowing anything about statsmodels itself.
+
+    Parameters
+    ----------
+    order : tuple, default (1, 0, 0)
+        ARIMA (p, d, q) order.
+
+    trend : str or None, default None
+        Trend parameter passed to statsmodels.tsa.ARIMA.
+    """
+
+    def __init__(
+        self,
+        order: tuple[int, int, int] = (1, 0, 0),
+        trend: Optional[str] = None,
+    ) -> None:
+        super().__init__()
+        self.order = order
+        self.trend = trend
+        self._result = None
+
+        if not HAS_STATSMODELS:
+            # Delay failure until fit(), but this flag controls tests.
+            pass
+
+    def fit(
+        self,
+        X: np.ndarray,
+        y: np.ndarray,
+        sample_weight: Optional[np.ndarray] = None,
+    ) -> "ArimaAdapter":
+        if not HAS_STATSMODELS:
+            raise ImportError(
+                "ArimaAdapter requires 'statsmodels' to be installed. "
+                "Install it with `pip install statsmodels`."
+            )
+
+        y_arr = np.asarray(y, dtype=float)
+
+        # Classic ARIMA interface
+        model = _sm.tsa.ARIMA(
+            y_arr,
+            order=self.order,
+            trend=self.trend,
+        )
+
+        # Default fit is fine for synthetic / test use
+        self._result = model.fit()
+        return self
+
+    def predict(self, X: np.ndarray) -> np.ndarray:
+        if self._result is None:
+            raise RuntimeError(
+                "ArimaAdapter has not been fit yet. Call .fit(X, y) first."
+            )
+
+        n_steps = len(X)
+        if n_steps <= 0:
+            return np.array([], dtype=float)
+
+        forecast = self._result.forecast(steps=n_steps)
+        return np.asarray(forecast, dtype=float)
+
+    # Minimal param API so _clone_model() can reconstruct it.
+    def get_params(self, deep: bool = True) -> dict:
+        return {
+            "order": self.order,
+            "trend": self.trend,
+        }
+
+    def set_params(self, **params):
+        for k, v in params.items():
+            setattr(self, k, v)
+        return self
+
+    def __repr__(self) -> str:
+        return f"ArimaAdapter(order={self.order}, trend={self.trend!r})"
 
 
 # Optional CatBoost support

@@ -44,6 +44,7 @@ from .electric_barometer import (
     BaseAdapter,
     ProphetAdapter,
     SarimaxAdapter,
+    ArimaAdapter,
     LightGBMRegressorAdapter,
     CatBoostAdapter,
 )
@@ -90,6 +91,7 @@ __all__ = [
     "BaseAdapter",
     "ProphetAdapter",
     "SarimaxAdapter",
+    "ArimaAdapter",
     "LightGBMRegressorAdapter",
     "CatBoostAdapter",
 

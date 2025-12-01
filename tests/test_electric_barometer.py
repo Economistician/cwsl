@@ -30,6 +30,7 @@ from cwsl import (
     SarimaxAdapter,
     LightGBMRegressorAdapter,
     CatBoostAdapter,
+    ArimaAdapter,
 )
 
 
@@ -617,6 +618,69 @@ def test_sarimax_adapter_with_electric_barometer():
     assert set(eb.results_.index) == set(models.keys())
 
     # Validation CWSL for winner should be finite and non-negative
+    assert eb.validation_cwsl_ is not None
+    assert np.isfinite(eb.validation_cwsl_)
+    assert eb.validation_cwsl_ >= 0.0
+
+    # Predictions on validation set
+    y_pred = eb.predict(X_val)
+    assert isinstance(y_pred, np.ndarray)
+    assert y_pred.shape == y_val.shape
+
+    cwsl_val = eb.cwsl_score(y_true=y_val, y_pred=y_pred)
+    assert np.isfinite(cwsl_val)
+    assert cwsl_val >= 0.0
+
+
+@pytest.mark.skipif(not HAS_STATSMODELS, reason="statsmodels is not installed")
+def test_arima_adapter_with_electric_barometer():
+    """
+    Ensure ArimaAdapter can plug into ElectricBarometer and run end-to-end.
+
+    ArimaAdapter ignores X (uses y as a univariate series) and forecasts
+    len(X_val) steps ahead from the end of the training series.
+    From the EB side, we just need a clean fit/predict cycle and finite CWSL.
+    """
+    rng = np.random.RandomState(2026)
+
+    n_samples = 90
+    n_features = 2
+
+    # Tabular X just acts as a placeholder; ArimaAdapter will ignore it.
+    X = rng.randn(n_samples, n_features)
+
+    # Simple strictly positive series derived from X[:, 0]
+    noise = rng.randn(n_samples) * 0.2
+    y_raw = 2.0 * X[:, 0] + noise
+    y = y_raw - y_raw.min() + 1.0
+
+    # Holdout split
+    X_train, X_val = X[:70], X[70:]
+    y_train, y_val = y[:70], y[70:]
+
+    models = {
+        "dummy": DummyRegressor(strategy="mean"),
+        "arima": ArimaAdapter(order=(1, 0, 0)),
+    }
+
+    eb = ElectricBarometer(
+        models=models,
+        cu=2.0,
+        co=1.0,
+        tau=2.0,
+        selection_mode="holdout",
+        refit_on_full=False,
+    )
+
+    eb.fit(X_train, y_train, X_val, y_val)
+
+    assert eb.best_name_ in models
+    assert eb.best_model_ is not None
+
+    assert isinstance(eb.results_, pd.DataFrame)
+    assert set(eb.results_.index) == set(models.keys())
+
+    # Validation CWSL for the winner should be finite and non-negative
     assert eb.validation_cwsl_ is not None
     assert np.isfinite(eb.validation_cwsl_)
     assert eb.validation_cwsl_ >= 0.0
