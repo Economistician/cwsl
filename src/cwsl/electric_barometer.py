@@ -307,6 +307,168 @@ class SarimaxAdapter(BaseAdapter):
         )
 
 
+# Optional CatBoost support
+try:  # pragma: no cover - import guard
+    from catboost import CatBoostRegressor as _CatBoostRegressor  # type: ignore[import]
+
+    HAS_CATBOOST = True
+except Exception:  # pragma: no cover - import guard
+    _CatBoostRegressor = None
+    HAS_CATBOOST = False
+
+
+class CatBoostAdapter(BaseAdapter):
+    """
+    Adapter for `catboost.CatBoostRegressor` so it can be used inside
+    ElectricBarometer with optional dependency handling and clean cloning.
+
+    Notes
+    -----
+    * X and y are treated as regular tabular regression data.
+    * sample_weight is passed through when provided.
+    * Verbose training output is disabled by default to keep logs clean.
+
+    Example
+    -------
+    models = {
+        "dummy": DummyRegressor(strategy="mean"),
+        "catboost": CatBoostAdapter(
+            depth=4,
+            learning_rate=0.1,
+            iterations=200,
+            loss_function="RMSE",
+        ),
+    }
+    eb = ElectricBarometer(models=models, cu=2.0, co=1.0)
+    eb.fit(X_train, y_train, X_val, y_val)
+    """
+
+    def __init__(self, **params: Any) -> None:
+        if not HAS_CATBOOST:
+            raise ImportError(
+                "CatBoostAdapter requires the optional 'catboost' package. "
+                "Install it via `pip install catboost`."
+            )
+        self._params: Dict[str, Any] = dict(params)
+        # Default quiet training if user didn't override verbosity
+        if "verbose" not in self._params:
+            self._params["verbose"] = False
+        self._model: Optional[_CatBoostRegressor] = _CatBoostRegressor(
+            **self._params
+        )
+
+    def fit(
+        self,
+        X: np.ndarray,
+        y: np.ndarray,
+        sample_weight: Optional[np.ndarray] = None,
+    ) -> "CatBoostAdapter":
+        if not HAS_CATBOOST or self._model is None:
+            raise RuntimeError(
+                "CatBoostAdapter cannot fit because 'catboost' is not available "
+                "or the internal model is not initialized."
+            )
+
+        X_arr = np.asarray(X)
+        y_arr = np.asarray(y, dtype=float)
+
+        if sample_weight is not None:
+            sw_arr = np.asarray(sample_weight, dtype=float)
+            self._model.fit(X_arr, y_arr, sample_weight=sw_arr)
+        else:
+            self._model.fit(X_arr, y_arr)
+
+        return self
+
+    def predict(self, X: np.ndarray) -> np.ndarray:
+        if self._model is None:
+            raise RuntimeError(
+                "CatBoostAdapter has not been fit yet. Call .fit(X, y) first."
+            )
+
+        X_arr = np.asarray(X)
+        y_pred = self._model.predict(X_arr)
+        return np.asarray(y_pred, dtype=float).ravel()
+
+    # Minimal param API so sklearn.clone or our _clone_model can reconstruct it.
+    def get_params(self, deep: bool = True) -> dict:
+        return dict(self._params)
+
+    def set_params(self, **params):
+        self._params.update(params)
+        if HAS_CATBOOST:
+            self._model = _CatBoostRegressor(**self._params)
+        return self
+
+    def __repr__(self) -> str:
+        return f"CatBoostAdapter(params={self._params})"
+
+
+class LightGBMRegressorAdapter(BaseAdapter):
+    """
+    Adapter for `lightgbm.LGBMRegressor` so it can be used inside ElectricBarometer.
+
+    - Lazily imports LightGBM (no hard dependency for core CWSL).
+    - Stores init kwargs so `_clone_model` can reconstruct via `__class__(**params)`.
+
+    Typical usage
+    -------------
+    >>> from cwsl import LightGBMRegressorAdapter
+    >>> models = {
+    ...     "lgbm": LightGBMRegressorAdapter(
+    ...         n_estimators=200,
+    ...         learning_rate=0.05,
+    ...         max_depth=-1,
+    ...     ),
+    ... }
+    """
+
+    def __init__(self, **lgbm_kwargs: Any) -> None:
+        try:
+            from lightgbm import LGBMRegressor  # type: ignore
+        except Exception as e:  # pragma: no cover - import failure path
+            raise ImportError(
+                "LightGBMRegressorAdapter requires the optional 'lightgbm' "
+                "package. Install it via `pip install lightgbm`."
+            ) from e
+
+        self._LGBMRegressor = LGBMRegressor
+        self.lgbm_kwargs: Dict[str, Any] = dict(lgbm_kwargs)
+        self.model = LGBMRegressor(**self.lgbm_kwargs)
+
+    def fit(
+        self,
+        X: np.ndarray,
+        y: np.ndarray,
+        sample_weight: Optional[np.ndarray] = None,
+    ) -> "LightGBMRegressorAdapter":
+        X_arr = np.asarray(X)
+        y_arr = np.asarray(y, dtype=float)
+
+        if sample_weight is not None:
+            sw = np.asarray(sample_weight, dtype=float)
+            self.model.fit(X_arr, y_arr, sample_weight=sw)
+        else:
+            self.model.fit(X_arr, y_arr)
+
+        return self
+
+    def predict(self, X: np.ndarray) -> np.ndarray:
+        X_arr = np.asarray(X)
+        preds = self.model.predict(X_arr)
+        return np.asarray(preds, dtype=float)
+
+    # sklearn-like param API so _clone_model can reconstruct via __class__(**params)
+    def get_params(self, deep: bool = True) -> Dict[str, Any]:
+        return dict(self.lgbm_kwargs)
+
+    def set_params(self, **params: Any) -> "LightGBMRegressorAdapter":
+        self.lgbm_kwargs.update(params)
+        # Rebuild underlying model with updated kwargs
+        self.model = self._LGBMRegressor(**self.lgbm_kwargs)
+        return self
+
+
 class ElectricBarometer:
     """
     ElectricBarometer: cost-aware model selector built on CWSL.
@@ -443,7 +605,9 @@ class ElectricBarometer:
             )
 
         if selection_mode == "cv" and (cv is None or cv < 2):
-            raise ValueError(f"In CV mode, cv must be at least 2; got {cv!r}.")
+            raise ValueError(
+                f"In CV mode, cv must be at least 2; got {cv!r}."
+            )
 
         self.models: Dict[str, Any] = models
         self.cu: float = float(cu)

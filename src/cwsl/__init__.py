@@ -44,6 +44,8 @@ from .electric_barometer import (
     BaseAdapter,
     ProphetAdapter,
     SarimaxAdapter,
+    LightGBMRegressorAdapter,
+    CatBoostAdapter,
 )
 
 from .cwsl_regressor import CWSLRegressor
@@ -88,6 +90,8 @@ __all__ = [
     "BaseAdapter",
     "ProphetAdapter",
     "SarimaxAdapter",
+    "LightGBMRegressorAdapter",
+    "CatBoostAdapter",
 
     "CWSLRegressor",
 ]
