@@ -1,6 +1,7 @@
 # CWSL — Cost-Weighted Service Loss  
 [![license](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 ![status](https://img.shields.io/badge/status-active-brightgreen)
+![autoengine](https://img.shields.io/badge/AutoEngine-Included-6f42c1)
 
 ---
 
@@ -450,7 +451,38 @@ Adapters allow ElectricBarometer to be used with **any** forecasting engine whil
 
 ---
 
-# 11. scikit-learn Integration
+# 11. AutoEngine -- Automatic Model-Zoo Builder
+
+`AutoEngine` is a convenience wrapper that automatically constructs a **collection of strong baseline models** (linear, regularized, tree-based, boosting) based on what packages are installed.
+
+It returns an `ElectricBarometer` preloaded with this model zoo — letting you run a **cost-aware model tournament** with one line of code.
+
+**Example**
+
+```python
+from cwsl import AutoEngine
+
+ae = AutoEngine(cu=2.0, co=1.0)
+eb = ae.build_selector(X, y)
+
+eb.fit(X_train, y_train, X_val, y_val)
+print("Winner:", eb.best_name_)
+```
+
+AutoEngine automatically includes:
+
+- Dummy baseline
+- LinearRegression / Ridge / Lasso
+- RandomForestRegressor
+- GradientBoostingRegressor
+- XGBoost (if installed)
+- LightGBM (if installed)
+
+Adapters or custom models can still be added to the returned `ElectricBarometer` before fitting.
+
+---
+
+# 12. scikit-learn Integration
 
 CWSL can be used directly as a scorer:
 
@@ -475,7 +507,7 @@ grid = GridSearchCV(
 
 ---
 
-# 12. CWSLRegressor -- Cost-Aware Ensemble Model Selector
+# 13. CWSLRegressor -- Cost-Aware Ensemble Model Selector
 
 `CWSLRegressor` is a scikit-learn–compatible estimator that evaluates multiple candidate models and automatically selects the one that minimizes **CWSL** on validation data.
 
@@ -523,7 +555,7 @@ print("Selected model:", reg.best_name_)
 
 ---
 
-# 12. Why CWSL Matters
+# 14. Why CWSL Matters
 
 Operational asymmetry is real:
 
@@ -544,7 +576,7 @@ If being “short” is worse than being “long,” CWSL is the correct metric.
 
 ---
 
-# 13. Domains
+# 15. Domains
 
 CWSL is used in:
 
@@ -559,7 +591,7 @@ CWSL is used in:
 
 ---
 
-# 14. Project Status
+# 16. Project Status
 
 ### Delivered
 - Core metric suite  
@@ -578,7 +610,7 @@ CWSL is used in:
 
 ---
 
-# 15. Contact
+# 17. Contact
 
 **Kyle Corrie (Economistician)**  
 Creator of CWSL and the Forecast Readiness Framework  

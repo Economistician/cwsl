@@ -51,6 +51,8 @@ from .electric_barometer import (
 
 from .cwsl_regressor import CWSLRegressor
 
+from .auto_engine import AutoEngine
+
 __all__ = [
     # Core metrics
     "cwsl",
@@ -96,4 +98,6 @@ __all__ = [
     "CatBoostAdapter",
 
     "CWSLRegressor",
+
+    "AutoEngine"
 ]
