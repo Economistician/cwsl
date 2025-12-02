@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Literal
+import importlib.util
 
 import numpy as np
 
@@ -12,48 +13,52 @@ from .electric_barometer import (
     ElectricBarometer,
     LightGBMRegressorAdapter,
     CatBoostAdapter,
-    ProphetAdapter,
-    SarimaxAdapter,
-    ArimaAdapter,
 )
 
-try:  # Optional XGBoost
-    from xgboost import XGBRegressor  # type: ignore
-
-    HAS_XGB = True
-except Exception:  # pragma: no cover - import guard
-    HAS_XGB = False
+SpeedType = Literal["fast", "balanced", "slow"]
 
 
 class AutoEngine:
     """
-    AutoEngine: convenience builder for ElectricBarometer model pools.
+    AutoEngine: convenience factory for ElectricBarometer with a curated
+    model zoo and CWSL settings.
 
-    It encapsulates a few common decisions:
+    It builds an ElectricBarometer with a set of candidate models chosen
+    based on a simple `speed` preset:
 
-      * Which model families to include (linear, trees, boosting, GBMs, time-series adapters).
-      * Whether the problem is plain tabular vs univariate time series.
-      * Whether optional dependencies (xgboost, lightgbm, catboost, prophet, statsmodels)
-        are available, and only adds those engines if they are installed.
+    - speed="fast"
+        Small, cheap model zoo. Good for quick experiments or CI.
+    - speed="balanced" (default)
+        Solid all-rounder. Good trade-off between runtime and accuracy.
+    - speed="slow"
+        Heavier tree/boosting configs. Use when you really care about
+        squeezing out extra performance and can afford wall-clock time.
 
-    Typical usage
-    -------------
-    >>> from cwsl import AutoEngine
-    >>> ae = AutoEngine(
-    ...     cu=2.0,
-    ...     co=1.0,
-    ...     use_linear=True,
-    ...     use_trees=True,
-    ...     use_xgboost=True,
-    ... )
-    >>> eb = ae.build_selector(X_train, y_train)
-    >>> eb.fit(X_train, y_train, X_val, y_val)
-    >>> print(eb.best_name_)
+    Parameters
+    ----------
+    cu : float
+        Underbuild (shortfall) cost per unit.
+    co : float
+        Overbuild (excess) cost per unit.
+    tau : float, default 2.0
+        Reserved for future diagnostics; forwarded to ElectricBarometer.
+    selection_mode : {"holdout", "cv"}, default "holdout"
+        How ElectricBarometer should select models.
+    cv : int, default 3
+        Number of folds when selection_mode="cv".
+    random_state : int or None, default None
+        Seed used for tree/boosting models and CV.
+    speed : {"fast", "balanced", "slow"}, default "balanced"
+        Controls which models are included and how "heavy" they are
+        parametrized.
 
     Notes
     -----
-    * Step 1 implementation focuses on **tabular** regression engines.
-      Time-series adapters (Prophet, ARIMA/SARIMAX) are wired in but optional.
+    - Optional engines (xgboost, lightgbm, catboost) are included only
+      if the corresponding packages are installed.
+    - build_selector() currently does *not* use X, y directly, but they
+      are accepted so that future heuristics (e.g. n_samples-based
+      decisions) can be added without breaking the API.
     """
 
     def __init__(
@@ -61,22 +66,11 @@ class AutoEngine:
         *,
         cu: float = 2.0,
         co: float = 1.0,
+        tau: float = 2.0,
         selection_mode: str = "holdout",
         cv: int = 3,
         random_state: Optional[int] = None,
-        # Model family toggles
-        use_dummy: bool = True,
-        use_linear: bool = True,
-        use_regularized_linear: bool = True,
-        use_trees: bool = True,
-        use_gbm: bool = True,
-        use_xgboost: bool = True,
-        use_lightgbm: bool = True,
-        use_catboost: bool = True,
-        # Time-series style engines (future expansion / opt-in)
-        use_prophet: bool = False,
-        use_sarimax: bool = False,
-        use_arima: bool = False,
+        speed: SpeedType = "balanced",
     ) -> None:
         if cu <= 0 or co <= 0:
             raise ValueError("AutoEngine: cu and co must be strictly positive.")
@@ -87,186 +81,188 @@ class AutoEngine:
                 f"got {selection_mode!r}."
             )
 
+        if speed not in {"fast", "balanced", "slow"}:
+            raise ValueError(
+                "AutoEngine.speed must be one of 'fast', 'balanced', 'slow'; "
+                f"got {speed!r}."
+            )
+
         self.cu = float(cu)
         self.co = float(co)
+        self.tau = float(tau)
         self.selection_mode = selection_mode
         self.cv = int(cv)
         self.random_state = random_state
-
-        # Model family flags
-        self.use_dummy = bool(use_dummy)
-        self.use_linear = bool(use_linear)
-        self.use_regularized_linear = bool(use_regularized_linear)
-        self.use_trees = bool(use_trees)
-        self.use_gbm = bool(use_gbm)
-        self.use_xgboost = bool(use_xgboost)
-        self.use_lightgbm = bool(use_lightgbm)
-        self.use_catboost = bool(use_catboost)
-
-        self.use_prophet = bool(use_prophet)
-        self.use_sarimax = bool(use_sarimax)
-        self.use_arima = bool(use_arima)
+        self.speed: SpeedType = speed
 
     # ------------------------------------------------------------------
-    # Internal: build tabular model zoo
+    # Internal helpers
     # ------------------------------------------------------------------
-    def _build_tabular_models(self, X: np.ndarray, y: np.ndarray) -> Dict[str, Any]:
+    @staticmethod
+    def _has_package(name: str) -> bool:
+        """Return True if the given package can be imported."""
+        return importlib.util.find_spec(name) is not None
+
+    def _make_base_models(self) -> Dict[str, Any]:
         """
-        Construct a dictionary of model candidates for tabular regression.
+        Build the default model zoo for the chosen speed preset.
 
-        X and y are accepted so that future versions could adapt depth,
-        n_estimators, etc., based on sample size or feature count.
+        Returns
+        -------
+        models : dict[str, Any]
+            Keys are model names, values are estimator objects.
         """
         models: Dict[str, Any] = {}
 
-        n_samples, n_features = X.shape[0], X.shape[1] if X.ndim == 2 else (X.shape[0], 1)[1]
+        # Always-include baselines
+        models["dummy_mean"] = DummyRegressor(strategy="mean")
+        models["linear"] = LinearRegression()
+        models["ridge"] = Ridge(alpha=1.0, random_state=self.random_state)
+        models["lasso"] = Lasso(alpha=0.001, random_state=self.random_state)
 
-        # 1) Baseline
-        if self.use_dummy:
-            models["dummy_mean"] = DummyRegressor(strategy="mean")
+        # Tree / ensemble configs differ by speed
+        if self.speed == "fast":
+            rf_estimators = 30
+            gbr_estimators = 60
+            gbr_lr = 0.1
+        elif self.speed == "balanced":
+            rf_estimators = 100
+            gbr_estimators = 100
+            gbr_lr = 0.1
+        else:  # "slow"
+            rf_estimators = 300
+            gbr_estimators = 300
+            gbr_lr = 0.05
 
-        # 2) Linear family
-        if self.use_linear:
-            models["linear"] = LinearRegression()
+        models["rf"] = RandomForestRegressor(
+            n_estimators=rf_estimators,
+            max_depth=None,
+            n_jobs=-1,
+            random_state=self.random_state,
+        )
 
-        if self.use_regularized_linear:
-            models["ridge"] = Ridge(alpha=1.0, random_state=self.random_state)
-            models["lasso"] = Lasso(alpha=0.001, random_state=self.random_state)
+        models["gbr"] = GradientBoostingRegressor(
+            n_estimators=gbr_estimators,
+            learning_rate=gbr_lr,
+            max_depth=3,
+            random_state=self.random_state,
+        )
 
-        # 3) Tree ensembles
-        if self.use_trees:
-            models["rf"] = RandomForestRegressor(
-                n_estimators=80,
-                max_depth=None,
-                random_state=self.random_state,
-                n_jobs=-1,
-            )
+        # Optional: XGBoost (sklearn API)
+        if self._has_package("xgboost"):
+            try:  # pragma: no cover - depends on optional pkg
+                from xgboost import XGBRegressor  # type: ignore
 
-        if self.use_gbm:
-            models["gbr"] = GradientBoostingRegressor(
-                n_estimators=120,
-                learning_rate=0.05,
-                random_state=self.random_state,
-            )
+                if self.speed == "fast":
+                    xgb_estimators = 60
+                    xgb_lr = 0.15
+                elif self.speed == "balanced":
+                    xgb_estimators = 120
+                    xgb_lr = 0.1
+                else:  # "slow"
+                    xgb_estimators = 300
+                    xgb_lr = 0.05
 
-        # 4) Gradient-boosting libraries (optional)
-        if self.use_xgboost and HAS_XGB:
-            models["xgb"] = XGBRegressor(
-                objective="reg:squarederror",
-                n_estimators=120,
-                max_depth=3,
-                learning_rate=0.08,
-                subsample=0.9,
-                colsample_bytree=0.9,
-                random_state=self.random_state,
-            )
-
-        if self.use_lightgbm:
-            try:
-                models["lgbm"] = LightGBMRegressorAdapter(
-                    n_estimators=150,
-                    learning_rate=0.05,
+                models["xgb"] = XGBRegressor(
+                    objective="reg:squarederror",
+                    n_estimators=xgb_estimators,
+                    max_depth=4,
+                    learning_rate=xgb_lr,
                     subsample=0.9,
                     colsample_bytree=0.9,
                     random_state=self.random_state,
                 )
             except Exception:
-                # LightGBM not installed; silently skip
+                # If xgboost is partially installed or misconfigured,
+                # we simply skip it rather than failing AutoEngine.
                 pass
 
-        if self.use_catboost:
-            try:
+        # Optional: LightGBM via adapter
+        if self._has_package("lightgbm"):
+            try:  # pragma: no cover - depends on optional pkg
+                if self.speed == "fast":
+                    lgbm_estimators = 80
+                    lgbm_lr = 0.1
+                elif self.speed == "balanced":
+                    lgbm_estimators = 150
+                    lgbm_lr = 0.07
+                else:  # "slow"
+                    lgbm_estimators = 300
+                    lgbm_lr = 0.05
+
+                models["lgbm"] = LightGBMRegressorAdapter(
+                    n_estimators=lgbm_estimators,
+                    learning_rate=lgbm_lr,
+                    max_depth=-1,
+                    subsample=0.9,
+                    colsample_bytree=0.9,
+                    random_state=self.random_state,
+                )
+            except Exception:
+                # Adapter will raise if lightgbm is missing; just skip.
+                pass
+
+        # Optional: CatBoost via adapter (mainly for balanced/slow)
+        if self._has_package("catboost") and self.speed in {"balanced", "slow"}:
+            try:  # pragma: no cover - depends on optional pkg
+                if self.speed == "balanced":
+                    cb_iterations = 120
+                    cb_lr = 0.1
+                else:  # "slow"
+                    cb_iterations = 300
+                    cb_lr = 0.05
+
                 models["catboost"] = CatBoostAdapter(
-                    iterations=200,
+                    iterations=cb_iterations,
                     depth=4,
-                    learning_rate=0.05,
+                    learning_rate=cb_lr,
                     loss_function="RMSE",
                     verbose=False,
                     random_seed=self.random_state,
                 )
             except Exception:
-                # catboost not installed; silently skip
                 pass
 
         return models
 
     # ------------------------------------------------------------------
-    # Public API: build ElectricBarometer
+    # Public API
     # ------------------------------------------------------------------
-    def build_models(
-        self,
-        X: np.ndarray,
-        y: np.ndarray,
-        *,
-        problem_type: str = "tabular",
-    ) -> Dict[str, Any]:
-        """
-        Build the dictionary of candidate models for the given data.
-
-        Parameters
-        ----------
-        X : array-like, shape (n_samples, n_features)
-            Training features. For now, only used for tabular problems.
-
-        y : array-like, shape (n_samples,)
-            Training targets.
-
-        problem_type : {"tabular", "univariate_ts"}, default "tabular"
-            - "tabular": treat X as regular feature matrix, use ML regressors.
-            - "univariate_ts": future hook for ARIMA/Prophet-style auto pools.
-
-        Returns
-        -------
-        models : dict[str, Any]
-            Model name → estimator/adapter with fit/predict.
-        """
-        X_arr = np.asarray(X)
-        y_arr = np.asarray(y, dtype=float)
-
-        if problem_type == "tabular":
-            return self._build_tabular_models(X_arr, y_arr)
-
-        if problem_type == "univariate_ts":
-            # Placeholder: for now just fall back to tabular pool on shape.
-            # A future version can build a time-series-specific zoo here.
-            return self._build_tabular_models(X_arr.reshape(-1, 1), y_arr)
-
-        raise ValueError(
-            "AutoEngine.build_models: problem_type must be 'tabular' or 'univariate_ts', "
-            f"got {problem_type!r}."
-        )
-
     def build_selector(
         self,
         X: np.ndarray,
         y: np.ndarray,
-        *,
-        problem_type: str = "tabular",
     ) -> ElectricBarometer:
         """
-        Build an ElectricBarometer configured with an auto-constructed model zoo.
+        Build an ElectricBarometer configured with a default model zoo.
 
-        This does **not** call .fit() — it just returns the selector ready
-        to be fit on your preferred train/validation split.
+        Parameters
+        ----------
+        X : array-like of shape (n_samples, n_features)
+            Currently unused by the builder, but accepted for future
+            heuristics (e.g. auto-detect very small samples).
+        y : array-like of shape (n_samples,)
+            Currently unused by the builder.
 
-        Example
+        Returns
         -------
-        >>> ae = AutoEngine(cu=2.0, co=1.0)
-        >>> eb = ae.build_selector(X_train, y_train)
-        >>> eb.fit(X_train, y_train, X_val, y_val)
-        """
-        models = self.build_models(X, y, problem_type=problem_type)
+        eb : ElectricBarometer
+            An *unfitted* ElectricBarometer instance. Call:
 
-        if not models:
-            raise RuntimeError(
-                "AutoEngine.build_selector constructed an empty model dictionary. "
-                "Check your model-family flags or optional dependency installs."
-            )
+                eb.fit(X_train, y_train, X_val, y_val)
+
+            to perform cost-aware model selection.
+        """
+        # X, y are not used yet; they are passed to keep API future-proof.
+        _ = (X, y)
+
+        models = self._make_base_models()
 
         eb = ElectricBarometer(
             models=models,
             cu=self.cu,
             co=self.co,
+            tau=self.tau,
             selection_mode=self.selection_mode,
             cv=self.cv,
             random_state=self.random_state,
@@ -275,14 +271,7 @@ class AutoEngine:
 
     def __repr__(self) -> str:
         return (
-            "AutoEngine("
-            f"cu={self.cu}, co={self.co}, "
+            f"AutoEngine(cu={self.cu}, co={self.co}, tau={self.tau}, "
             f"selection_mode={self.selection_mode!r}, cv={self.cv}, "
-            f"use_dummy={self.use_dummy}, use_linear={self.use_linear}, "
-            f"use_regularized_linear={self.use_regularized_linear}, "
-            f"use_trees={self.use_trees}, use_gbm={self.use_gbm}, "
-            f"use_xgboost={self.use_xgboost}, "
-            f"use_lightgbm={self.use_lightgbm}, use_catboost={self.use_catboost}, "
-            f"use_prophet={self.use_prophet}, use_sarimax={self.use_sarimax}, "
-            f"use_arima={self.use_arima})"
+            f"random_state={self.random_state!r}, speed={self.speed!r})"
         )

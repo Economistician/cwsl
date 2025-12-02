@@ -449,6 +449,28 @@ class MyAdapter:
 
 Adapters allow ElectricBarometer to be used with **any** forecasting engine while still selecting models using **CWSL**, **RMSE**, and **wMAPE**.
 
+### AutoEngine Speed Presets (fast / balanced / slow)
+
+AutoEngine includes optional **speed presets** that control how large or expressive the model zoo is:
+
+- **fast** — smallest model set (very quick iteration)
+- **balanced** *(default)* — solid general-purpose model pool
+- **slow** — full model zoo (trees + boosting + GBMs if installed)
+
+**Example**
+
+```python
+from cwsl import AutoEngine
+
+# Fast exploration (small model zoo)
+ae_fast = AutoEngine(cu=2.0, co=1.0, speed="fast")
+
+# Larger, more expressive model zoo
+ae_slow = AutoEngine(cu=2.0, co=1.0, speed="slow")
+```
+
+This lets you control the compute–accuracy tradeoff when running large model tournaments.
+
 ---
 
 # 11. AutoEngine -- Automatic Model-Zoo Builder

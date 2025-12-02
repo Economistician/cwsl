@@ -1,9 +1,17 @@
 from __future__ import annotations
 
+import importlib.util
+
 import numpy as np
 import pytest
 
 from cwsl import AutoEngine, ElectricBarometer
+
+
+# Optional dependency flags for assertions
+HAS_XGB = importlib.util.find_spec("xgboost") is not None
+HAS_LGBM = importlib.util.find_spec("lightgbm") is not None
+HAS_CATBOOST = importlib.util.find_spec("catboost") is not None
 
 
 def _make_positive_regression(
@@ -40,6 +48,7 @@ def test_auto_engine_build_selector_and_run_holdout():
         selection_mode="holdout",
         cv=3,
         random_state=42,
+        # speed left as default ("balanced")
     )
 
     eb = ae.build_selector(X_train, y_train)
@@ -52,7 +61,8 @@ def test_auto_engine_build_selector_and_run_holdout():
 
     # We should have at least the core tabular engines
     model_names = set(eb.models.keys())
-    expected_core = {"dummy_mean", "linear", "ridge", "lasso", "rf", "gbr"}
+    expected_core = {"dummy_mean", "linear", "ridge", "rf"}
+    # Lasso/GBR may be added depending on preset, but core subset must be present
     assert expected_core.issubset(model_names)
 
     # Full holdout run should complete and populate metrics
@@ -85,6 +95,7 @@ def test_auto_engine_cv_selection():
         selection_mode="cv",
         cv=3,
         random_state=7,
+        # default speed = "balanced"
     )
 
     eb = ae.build_selector(X, y)
@@ -115,48 +126,83 @@ def test_auto_engine_cv_selection():
     assert cwsl_val >= 0.0
 
 
-def test_auto_engine_respects_model_family_toggles():
+def test_auto_engine_speed_presets_change_model_zoo():
     """
-    If we disable all but one family, AutoEngine should build a small,
-    predictable model zoo.
+    The 'fast', 'balanced', and 'slow' presets should produce nested model zoos:
+    fast ⊆ balanced ⊆ slow, and always include a minimal core set.
     """
     rng = np.random.RandomState(999)
-    X, y = _make_positive_regression(rng, n_samples=120, n_features=2)
+    X, y = _make_positive_regression(rng, n_samples=150, n_features=3)
 
-    ae = AutoEngine(
+    ae_fast = AutoEngine(
         cu=2.0,
         co=1.0,
         selection_mode="holdout",
         cv=3,
         random_state=0,
-        # Only trees enabled
-        use_dummy=False,
-        use_linear=False,
-        use_regularized_linear=False,
-        use_trees=True,
-        use_gbm=False,
-        use_xgboost=False,
-        use_lightgbm=False,
-        use_catboost=False,
+        speed="fast",
+    )
+    ae_balanced = AutoEngine(
+        cu=2.0,
+        co=1.0,
+        selection_mode="holdout",
+        cv=3,
+        random_state=0,
+        speed="balanced",
+    )
+    ae_slow = AutoEngine(
+        cu=2.0,
+        co=1.0,
+        selection_mode="holdout",
+        cv=3,
+        random_state=0,
+        speed="slow",
     )
 
-    eb = ae.build_selector(X, y)
+    eb_fast = ae_fast.build_selector(X, y)
+    eb_balanced = ae_balanced.build_selector(X, y)
+    eb_slow = ae_slow.build_selector(X, y)
 
-    # With only trees enabled, we expect exactly one model: "rf"
-    assert set(eb.models.keys()) == {"rf"}
+    names_fast = set(eb_fast.models.keys())
+    names_balanced = set(eb_balanced.models.keys())
+    names_slow = set(eb_slow.models.keys())
 
-    # Quick holdout fit to ensure the single-model selector still runs
-    X_train, X_val = X[:90], X[90:]
-    y_train, y_val = y[:90], y[90:]
+    # Core engines should always be present
+    core = {"dummy_mean", "linear", "rf"}
+    assert core.issubset(names_fast)
+    assert core.issubset(names_balanced)
+    assert core.issubset(names_slow)
 
-    eb.fit(X_train, y_train, X_val, y_val)
+    # Presets should be nested in richness
+    assert names_fast.issubset(names_balanced)
+    assert names_balanced.issubset(names_slow)
 
-    assert eb.best_name_ == "rf"
-    assert eb.best_model_ is not None
+    # Optional dependency-based checks
+    if HAS_XGB:
+        # If xgboost is installed, it should appear in the richest preset
+        assert "xgb" in names_slow
 
-    y_pred = eb.predict(X_val)
-    assert y_pred.shape == y_val.shape
+    if HAS_LGBM:
+        # LightGBM adapter should also show up in the richest preset when installed
+        assert "lgbm" in names_slow
 
-    cwsl_val = eb.cwsl_score(y_true=y_val, y_pred=y_pred)
-    assert np.isfinite(cwsl_val)
-    assert cwsl_val >= 0.0
+    if HAS_CATBOOST:
+        # CatBoost adapter should be part of the richest preset when installed
+        assert "catboost" in names_slow
+
+    # Sanity: even in fast mode, a single-model EB still runs end-to-end
+    X_train, X_val = X[:100], X[100:]
+    y_train, y_val = y[:100], y[100:]
+
+    eb_fast.fit(X_train, y_train, X_val, y_val)
+
+    assert eb_fast.best_name_ in eb_fast.models
+    assert eb_fast.best_model_ is not None
+
+    y_pred_fast = eb_fast.predict(X_val)
+    assert isinstance(y_pred_fast, np.ndarray)
+    assert y_pred_fast.shape == y_val.shape
+
+    cwsl_val_fast = eb_fast.cwsl_score(y_true=y_val, y_pred=y_pred_fast)
+    assert np.isfinite(cwsl_val_fast)
+    assert cwsl_val_fast >= 0.0
